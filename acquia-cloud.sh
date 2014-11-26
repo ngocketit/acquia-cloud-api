@@ -11,6 +11,7 @@ CREDENTIALS_CACHE_DIR=$HOME/.acquia-cloud-util
 DEFAULT_EMAIL_ADDRESS=drupal@activeark.com
 API_ENDPOINT=https://cloudapi.acquia.com/v1
 COMMAND_FILE_PATH=./acquia-commands.sh
+DEFAULT_SITE_NAME=default
 
 CHOSEN_CACHE_FILE=""
 
@@ -279,10 +280,8 @@ __reset_variables()
 __add_credentials()
 {
   local site_name="" email="" key=""
-  while [ -z "$site_name" ]; do
-    __print_prompt "Site name:" && read site_name
-  done
 
+  __print_prompt "Site name [default]:" && read site_name && [ -z "$site_name" ] && site_name=$DEFAULT_SITE_NAME
   __print_prompt_email && read email && [ -z "$email" ] && email=$DEFAULT_EMAIL_ADDRESS
 
   while [ -z "$key" ]; do
@@ -314,6 +313,11 @@ __add_credentials()
 
 __get_environment()
 {
+  __select_environment
+}
+
+__select_environment()
+{
   local environments=(dev stg prod) choice
   select choice in "${environments[@]}"; do
     case $REPLY in
@@ -327,13 +331,6 @@ __get_environment()
 
   [ "$choice" == "stg" ] && choice="test"
   echo $choice
-}
-
-__print_cloud_operations()
-{
-  local task_ops=("task-list" "task-info")
-  local domain_ops=("domain-add" "domain-info" "domain-delete" "domain-list" "domain-move" "domain-purge")
-  local database_ops=("database-add" "database-copy" "database-delete" "database-info" "database-list")
 }
 
 __parse_commands_file()
@@ -371,10 +368,9 @@ __parse_command_line()
 
 __get_command_index_from_name()
 {
-  local cmd_index
-  for (( i=1; i<=${#COMMANDS_NAMES[@]}; i++ )); do
-    cmd_index=$i
-    [ "$1" == "$COMMANDS_NAMES[$i]" ] && break
+  local cmd_index=0
+  for (( i=1; i<=${#COMMAND_NAMES[@]}; i++ )); do
+    [ "$1" == "${COMMAND_NAMES[$i]}" ] && cmd_index=$i && break
   done
   echo $cmd_index
 }
@@ -397,6 +393,11 @@ __to_uppercase()
 __to_lowercase()
 {
   echo $1|tr '[:upper:]' '[:lower:]'
+}
+
+__is_integer()
+{
+  echo $1 | grep -E ^[0-9]+$
 }
 
 __print_prompt_email()
@@ -428,9 +429,11 @@ __get_command()
 {
   __parse_commands_file
 
-  COMMAND_INDEX=""
-  __print_prompt "Enter the command number:"
-  read COMMAND_INDEX
+  COMMAND_INDEX=0
+  local command_id=""
+  __print_prompt "Enter the command number or command name:" && read command_id
+  [ ! -z "$(__is_integer $command_id)" ] && COMMAND_INDEX=$command_id || COMMAND_INDEX=$(__get_command_index_from_name $command_id)
+  [ $COMMAND_INDEX -lt 1 ] || [ $COMMAND_INDEX -gt ${#COMMAND_NAMES[@]} ] && __print_error "Invalid command number or name. Aborted!" && exit 1
   PREPARED_COMMAND_PATH=${COMMAND_PATHS[$COMMAND_INDEX]}
 }
 
@@ -468,14 +471,63 @@ __ensure_command_params()
       :backup)
         __replace_command_pattern $param $(__prompt_user_input "Database backup ID: ")
         ;;
+
+      :server)
+        __replace_command_pattern $param $(__prompt_user_input "Server name: ")
+        ;;
     esac
   done
+}
+
+__is_async_command()
+{
+  local state=$(__parse_json $1 "state")
+  [ "$state" == "waiting" -o "$state" == "received" ] && echo $state || echo ""
+}
+
+
+__get_async_task_id()
+{
+  local task_id=$(__parse_json $1 "id")
+  echo $task_id
+}
+
+__wait_for_async_task()
+{
+  local async=$(__is_async_command $1) task_id=""
+  [ ! -z "$async" ] && task_id=$(__get_async_task_id $1)
+
+  [ ! -z "$task_id" ] && __print_warning "Waiting for task: $task_id to complete" && __check_async_task_state $task_id
+}
+
+__parse_json()
+{
+    echo $1 | sed -e 's/[{}]/''/g' | awk -F=':' -v RS=',' "\$1~/\"$2\"/ {print}" | sed -e "s/\"$2\"://" | tr -d "\n\t" | sed -e 's/\\"/"/g' | sed -e 's/\\\\/\\/g' | sed -e 's/^[ \t]*//g' | sed -e 's/^"//'  -e 's/"$//'
 }
 
 __replace_command_pattern()
 {
   IFS=$' '
   PREPARED_COMMAND_PATH=${PREPARED_COMMAND_PATH/$1/$2}
+}
+
+__check_async_task_state()
+{
+  local cmd_name="task-info"
+  local cmd_index=$(__get_command_index_from_name "$cmd_name")
+  local cmd_path=${COMMAND_PATHS[$cmd_index]}
+
+  cmd_path=${cmd_path/:site/$(__get_site_realm)}
+  cmd_path=${cmd_path/:task/$1}
+  local state="" cmd_output="" local delay=0.5
+
+  while [ 1 ]; do
+    cmd_output=$(curl -s -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${COMMAND_METHODS[$cmd_index]} ${API_ENDPOINT}${cmd_path}.json)
+    state=$(__parse_json "$cmd_output" state)
+    echo "State: $state"
+    [ "$state" == "done" -o "$state" == "error" ] && break
+    sleep $delay
+  done
 }
 
 __execute_command()
@@ -488,6 +540,7 @@ __execute_command()
 
   local cmd_output=$(curl -s -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${COMMAND_METHODS[$COMMAND_INDEX]} ${API_ENDPOINT}${PREPARED_COMMAND_PATH}.json)
   __beautify_json_output "$cmd_output"
+  __wait_for_async_task "$cmd_output"
 }
 
 __get_options()
@@ -495,9 +548,11 @@ __get_options()
   [ $# -eq 2 ] && SITE_NAME=$1 && COMMAND=$2
 
   [ -z "$SITE_NAME" ] && __get_sitename
-  local cred_file=$(__get_credentials_file $SITE_NAME)
+  local cred_file=$(__get_credentials_file $SITE_NAME) default_cred_file=$(__get_credentials_file $DEFAULT_SITE_NAME)
 
-  [ -f "$cred_file" ] && source $cred_file
+  [ -f "$cred_file" ] && source $cred_file 
+  [ -f "$default_cred_file" ] && source $default_cred_file
+
   [ -z "$EMAIL_ADDRESS" ] && __get_email_address
   [ -z "$PRIVATE_KEY" ] && __get_private_key
 
