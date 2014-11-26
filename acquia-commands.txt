@@ -5,14 +5,20 @@ task-info;GET;Get a task record;/sites/:site/tasks/:task
 [Domains]
 domain-list;GET;List an environment's domains;/sites/:site/envs/:env/domains
 domain-delete;DELETE;Delete a domain;/sites/:site/envs/:env/domains/:domain
-domain-purge;DELTE;Purge the Varnish cache for a domain;/sites/:site/envs/:env/domains/:domain/cache
+domain-purge;DELETE;Purge the Varnish cache for a domain;/sites/:site/envs/:env/domains/:domain/cache
+domain-add;POST;Add a domain name;/sites/:site/envs/:env/domains/:domain
+domain-info;GET;Get a domain record;/sites/:site/envs/:env/domains/:domain
 
 [Servers]
 server-list;GET;List a site environment's servers;/sites/:site/envs/:env/servers
+server-info;GET;Get a server record;/sites/:site/envs/:env/servers/:server
+server-max-processes;GET;Calculate a server's PHP max processes record;/sites/:site/envs/:env/servers/:server/php-procs
 
 [SSH keys]
 sshkey-list;GET;List a site's SSH keys;/sites/:site/sshkeys
 sshkey-info;GET;Get an SSH key;/sites/:site/sshkeys/:sshkeyid
+sshkey-delete;DELETE;Delete an SSH key;/sites/:site/sshkeys/:sshkeyid
+sshkey-add;POST;Add an SSH key;/sites/:site/sshkeys
 
 [Database]
 database-list;GET;List a site's databases;/sites/:site/dbs
