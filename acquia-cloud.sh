@@ -582,6 +582,7 @@ __get_command_params()
   shift
 
   # Ignore site name & command name which have been read already
+  [ $# -eq 1 ] && shift
   [ $# -ge 2 ] && shift && shift
 
   for breadcrumb in $cmd_parts; do
@@ -625,10 +626,10 @@ __get_options()
         ;;
 
       *) 
-        __print_usage
+        SITE_NAME=$1
         ;;
     esac
-    exit 0
+    [ -z "$SITE_NAME" ] && exit 0
   fi
 
   [ $# -ge 2 ] && SITE_NAME=$1 && COMMAND=$2
