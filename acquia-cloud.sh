@@ -448,8 +448,16 @@ __ensure_command_params()
         __replace_command_pattern $param $(__get_site_realm)
         ;;
 
-      :env|:source|:target)
-        __replace_command_pattern $param $(__get_environment)
+      :env)
+        __print_warning "Environment:" && __replace_command_pattern $param $(__get_environment)
+        ;;
+
+      :source)
+        __print_warning "Source environment:" && __replace_command_pattern $param $(__get_environment)
+        ;;
+
+      :target)
+        __print_warning "Target environment:" && __replace_command_pattern $param $(__get_environment)
         ;;
 
       :task)
