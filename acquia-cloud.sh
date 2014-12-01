@@ -26,6 +26,8 @@ COMMAND_METHODS=()
 COMMAND_DESCS=()
 COMMAND_PATHS=()
 COMMAND_INDEX=1
+COMMAND_ARGS_VALUES=()
+COMMAND_ARGS_NAMES=()
 
 # Color codes
 txtOff='\e[0m'          # Text Reset
@@ -269,44 +271,27 @@ __prepare_credentials_store()
   [ ! -d "$CREDENTIALS_CACHE_DIR" ] && mkdir $CREDENTIALS_CACHE_DIR
 }
 
-__reset_variables()
-{
-  SITE_NAME=""
-  EMAIL_ADDRESS=""
-  PRIVATE_KEY=""
-  COMMAND=""
-}
-
 __add_credentials()
 {
-  local site_name="" email="" key=""
+  __print_prompt "Site name [default]:" && read SITE_NAME && [ -z "$SITE_NAME" ] && SITE_NAME=$DEFAULT_SITE_NAME
+  __print_prompt_email && read EMAIL_ADDRESS && [ -z "$EMAIL_ADDRESS" ] && EMAIL_ADDRESS=$DEFAULT_EMAIL_ADDRESS
 
-  __print_prompt "Site name [default]:" && read site_name && [ -z "$site_name" ] && site_name=$DEFAULT_SITE_NAME
-  __print_prompt_email && read email && [ -z "$email" ] && email=$DEFAULT_EMAIL_ADDRESS
-
-  while [ -z "$key" ]; do
-    __print_prompt "Private key:" && read key
+  while [ -z "$PRIVATE_KEY" ]; do
+    __print_prompt "Private key:" && read PRIVATE_KEY
   done
 
-  __prepare_credentials_store
-
-  local confirm="y" cred_file=$(__get_credentials_file $site_name)
+  local confirm="y" cred_file=$(__get_credentials_file $SITE_NAME)
 
   if [ -f "$cred_file" ] && [ -z "$(cat $cred_file)" ]; then
-    confirm=$(__prompt_user_input "WARNING: Credentials for site $(__to_uppercase $site_name) is existing. Do you want to override it? [y/n] ")
-  else
-    touch $cred_file
+    confirm=$(__prompt_user_input "WARNING: Credentials for site $(__to_uppercase $SITE_NAME) is existing. Do you want to override it? [y/n] ")
   fi
 
   case "$confirm" in
     y|Y)
-      echo "#!/bin/bash" > $cred_file
-      echo "EMAIL_ADDRESS=$email" >> $cred_file
-      echo "PRIVATE_KEY=$key" >> $cred_file
-      __print_info "Credentials added!"
+      __save_credentials && __print_info "Credentials added!" && exit 0
       ;;
     *)
-      echo "Aborted!"
+      echo "Aborted!" && exit 1
       ;;
   esac
 }
@@ -389,6 +374,12 @@ __to_uppercase()
 __to_lowercase()
 {
   echo $1|tr '[:upper:]' '[:lower:]'
+}
+
+__ucase_first()
+{
+  local input="$1"
+  echo ${input^}
 }
 
 __is_integer()
@@ -505,7 +496,7 @@ __wait_for_async_task()
   local async=$(__is_async_command $1) task_id=""
   [ ! -z "$async" ] && task_id=$(__get_async_task_id $1)
 
-  [ ! -z "$task_id" ] && __print_warning "Waiting for task: $task_id to complete" && __check_async_task_state $task_id
+  [ ! -z "$task_id" ] && __print_warning "Waiting for task $task_id to complete" && __check_async_task_state $task_id
 }
 
 __parse_json()
@@ -517,6 +508,10 @@ __replace_command_pattern()
 {
   IFS=$' '
   PREPARED_COMMAND_PATH=${PREPARED_COMMAND_PATH/$1/$2}
+  local length=${#COMMAND_ARGS_VALUES[@]}
+  let "length+=1"
+  COMMAND_ARGS_NAMES[$length]=$1
+  COMMAND_ARGS_VALUES[$length]=$2
 }
 
 __issue_curl_command()
@@ -534,15 +529,58 @@ __check_async_task_state()
 
   cmd_path=${cmd_path/:site/$(__get_site_realm)}
   cmd_path=${cmd_path/:task/$1}
-  local state="" cmd_output="" local delay=0.5
+  local state="" cmd_output="" local delay=0.5 last_state="" total_time=0
 
   while [ 1 ]; do
     cmd_output=$(__issue_curl_command $cmd_method $cmd_path)
     state=$(__parse_json "$cmd_output" state)
-    echo "State: $state"
-    [ "$state" == "done" -o "$state" == "error" ] && break
-    sleep $delay
+
+    if [ "$last_state" != "$state" ]; then
+      [ -z "$last_state" ] && printf "State: $state" || printf "..${state}"
+    else
+      printf "."
+    fi
+    last_state=$state
+
+    [ "$state" == "done" -o "$state" == "error" ] && echo " (time: ${total_time} s)" && break
+    sleep $delay && total_time=$(echo $total_time + $delay | bc)
   done
+}
+
+__is_command_failed()
+{
+  local message=$(__parse_json "$1" message)
+  [ ! -z "$message" ] && echo "$message" || echo ""
+}
+
+__retry_credentials()
+{
+  EMAIL_ADDRESS="" 
+  PRIVATE_KEY="" 
+  __print_warning "Credentials failed. Please try a new one"
+  __get_email_address 
+  __get_private_key
+}
+
+__save_credentials()
+{
+  __prepare_credentials_store
+
+  local cred_file=$(__get_credentials_file "$SITE_NAME")
+  touch $cred_file
+  echo "#!/bin/bash" > $cred_file
+  echo "EMAIL_ADDRESS=$EMAIL_ADDRESS" >> $cred_file
+  echo "PRIVATE_KEY=$PRIVATE_KEY" >> $cred_file
+}
+
+__print_command_confirmation()
+{
+  local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]} cmd_desc=$(__to_lowercase "${COMMAND_DESCS[$COMMAND_INDEX]}")
+  __print_warning "WARNING: You are about to execute the command ${cmd_name} which will $cmd_desc with following arguments:"
+  for (( i=1; i<=${#COMMAND_ARGS_VALUES[@]}; i++ )); do
+    echo "* $(__ucase_first ${COMMAND_ARGS_NAMES[$i]//:/}): ${COMMAND_ARGS_VALUES[$i]}"
+  done
+  __print_prompt "Do you want to continue? [y/n]"
 }
 
 __execute_command()
@@ -552,10 +590,25 @@ __execute_command()
   IFS=$'/'
   __ensure_command_params $PREPARED_COMMAND_PATH
   IFS=$old_ifs
+  local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="n"
 
-  local cmd_output=$(__issue_curl_command ${COMMAND_METHODS[$COMMAND_INDEX]} $PREPARED_COMMAND_PATH)
-  __beautify_json_output "$cmd_output"
-  __wait_for_async_task "$cmd_output"
+  __print_command_confirmation && read cmd_confirm
+
+  case "$cmd_confirm" in
+    n|N)
+      __print_error "Aborted!" && exit 1
+      ;;
+  esac
+
+  while [ 1 ]; do
+    let "num_attempts+=1"
+    cmd_output=$(__issue_curl_command ${COMMAND_METHODS[$COMMAND_INDEX]} $PREPARED_COMMAND_PATH)
+    __beautify_json_output "$cmd_output" && cmd_state=$(__is_command_failed "$cmd_output")
+    [ "$num_attempts" -ge 3 ] && __print_error "You are out of luck. Please make sure you have correct credentials and access rights!" && break
+    [ ! -z "$cmd_state" ] && __retry_credentials || break
+  done
+
+  [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
 }
 
 __dry_run_credentials_check()
@@ -577,10 +630,8 @@ __ensure_valid_credentials()
   if [ -f "$cred_file" ]; then
     source $cred_file
   else
-    source $default_cred_file
+    [ -f "$default_cred_file" ] && source $default_cred_file
   fi
-
-  __dry_run_credentials_check
 }
 
 __get_command_params()
@@ -631,6 +682,10 @@ __get_options()
 
       --add-cred|-add)
         __add_credentials
+        ;;
+
+      -*)
+        __print_error "Invalid option!" && exit 1
         ;;
 
       *) 
