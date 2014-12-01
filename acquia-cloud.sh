@@ -6,11 +6,12 @@
 ###############################################################
 VERSION=0.1
 REPOS_URL=http://104.131.99.199/acquia-clould-util.sh
+COMMANDS_REPOS_URL=http://104.131.99.199/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
 CREDENTIALS_CACHE_DIR=$HOME/.acquia-cloud-util
 DEFAULT_EMAIL_ADDRESS=drupal@activeark.com
 API_ENDPOINT=https://cloudapi.acquia.com/v1
-COMMAND_FILE_PATH=./acquia-commands.txt
+COMMAND_FILE_PATH=${CREDENTIALS_CACHE_DIR}/.acquia-cloud-commands
 DEFAULT_SITE_NAME=default
 
 CHOSEN_CACHE_FILE=""
@@ -83,6 +84,7 @@ __do_self_update()
 {
   sudo mv $1 $INSTALL_PATH; [ -f $INSTALL_PATH ]; sudo chmod a+x $INSTALL_PATH; local status=$?
   __print_command_status "Self update"
+  __download_commands_file
   [ $status -eq 0 ] && __print_info "You need to relaunch the script, quit now!" && exit
 }
 
@@ -388,9 +390,17 @@ __get_environment()
   echo $choice
 }
 
+__download_commands_file()
+{
+  __prepare_credentials_store
+  curl -o $COMMAND_FILE_PATH $COMMANDS_REPOS_URL 2>/dev/null
+}
+
 __parse_commands_file()
 {
+  [ ! -f "$COMMAND_FILE_PATH" ] && __download_commands_file
   [ ! -f "$COMMAND_FILE_PATH" ] && __print_error "Command file not found" && exit 1
+
   local line category old_ifs=$IFS verbose=""
   [ "$1" == "verbose" ] && verbose="verbose"
 
