@@ -20,6 +20,7 @@ EMAIL_ADDRESS=""
 PRIVATE_KEY=""
 COMMAND=""
 PREPARED_COMMAND_PATH=""
+COMMAND_BODY=""
 
 COMMAND_NAMES=()
 COMMAND_METHODS=()
@@ -502,8 +503,11 @@ __get_command()
 
 __ensure_command_params()
 {
+  local path=$1
+  path=${path//\// }
+  path=${path//=/ }
   local params=() index=1
-  for param in "$@"; do
+  for param in $path; do
     [ -z "$param" ] || [ ! -z "$(echo $param|grep -v ":")" ] && continue
 
     case "$param" in
@@ -545,6 +549,10 @@ __ensure_command_params()
 
       :server)
         __replace_command_pattern $param $(__prompt_user_input "Server name: ")
+        ;;
+
+      :nickname)
+        __replace_command_pattern $param $(__prompt_user_input "SSH key nick name: ")
         ;;
     esac
   done
@@ -588,8 +596,14 @@ __replace_command_pattern()
 
 __issue_curl_command()
 {
-  echo "curl -s -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${1} ${API_ENDPOINT}${2}.json" > /tmp/command.txt
-  echo $(curl -s -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${1} ${API_ENDPOINT}${2}.json)
+  local cmd_method=$1 cmd_path=$2 cmd_body="$3"
+  # Make sure that the .json is appended to the correct location in the path
+  if [ ! -z "$(echo $cmd_path | grep ?)" ]; then
+    cmd_path=${cmd_path//\?/\.json\?}
+  else
+    cmd_path=$(echo "${cmd_path}.json")
+  fi
+  echo $(curl -s -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${cmd_method} --data "${cmd_body}" ${API_ENDPOINT}${cmd_path})
 }
 
 __check_async_task_state()
@@ -625,6 +639,12 @@ __is_command_failed()
   [ ! -z "$message" ] && echo "$message" || echo ""
 }
 
+__is_unauthorized()
+{
+  local message=$(__parse_json "$1" message)
+  [ ! -z "$message" ] && [ "$message" == "Not authorized" ] && echo "$message" || echo ""
+}
+
 __retry_credentials()
 {
   EMAIL_ADDRESS="" 
@@ -655,13 +675,65 @@ __print_command_confirmation()
   __print_prompt "Do you want to continue? [y/n]"
 }
 
+
+__get_command_body()
+{
+  COMMAND_BODY=""
+
+  case "${COMMAND_NAMES[$COMMAND_INDEX]}" in
+    sshkey-add)
+      local sshkey="" shell_access=true code_access=true blacklist="" envs=""
+
+      while [ -z "$sshkey" ]; do
+        sshkey=$(__prompt_user_input "SSH key file or hash: ")
+        [ -f "$sshkey" ] && sshkey=$(cat "$sshkey")
+      done
+
+      shell_access=$(__prompt_user_input "Allow shell access for this key [yes]? [y/n] ")
+      case "$shell_access" in
+        n|N)
+          shell_access="false"
+          ;;
+
+        *)
+          shell_access="true"
+          ;;
+      esac
+
+      code_access=$(__prompt_user_input "Allow access to code (GIT, SVN) for this key [yes]? [y/n] ")
+      case "$code_access" in
+        n|N)
+          code_access="false"
+          ;;
+
+        *)
+          code_access="true"
+          ;;
+      esac
+
+      envs=$(__prompt_user_input "Disallow access to environments (type dev,test,prod separated by commas) [allow all]? ")
+
+      if [ ! -z "$envs" ]; then
+        envs=${envs//,/ }
+
+        for env in $envs; do
+          blacklist=$(echo "${blacklist}\"$env\",")
+        done
+        blacklist=${blacklist/%,/}
+        blacklist=$(echo "[${blacklist}]")
+        blacklist=",\"blacklist\": ${blacklist}"
+      fi
+
+      COMMAND_BODY="{\"ssh_pub_key\":\"${sshkey}\",\"shell_access\":${shell_access},\"vcs_access\":${code_access}${blacklist}}"
+      ;;
+  esac
+}
+
 __execute_command()
 {
   echo "${COMMAND_DESCS[$COMMAND_INDEX]}"
-  local old_ifs=$IFS
-  IFS=$'/'
   __ensure_command_params $PREPARED_COMMAND_PATH
-  IFS=$old_ifs
+
   local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="y"
 
   [ ! -z "$(__get_command_option confirm)" ] && __print_command_confirmation && read cmd_confirm
@@ -672,27 +744,17 @@ __execute_command()
       ;;
   esac
 
+  __get_command_body
+
   while [ 1 ]; do
     let "num_attempts+=1"
-    cmd_output=$(__issue_curl_command ${COMMAND_METHODS[$COMMAND_INDEX]} $PREPARED_COMMAND_PATH)
-    __beautify_json_output "$cmd_output" && cmd_state=$(__is_command_failed "$cmd_output")
+    cmd_output=$(__issue_curl_command ${COMMAND_METHODS[$COMMAND_INDEX]} $PREPARED_COMMAND_PATH "$COMMAND_BODY")
+    __beautify_json_output "$cmd_output" && cmd_state=$(__is_unauthorized "$cmd_output")
     [ "$num_attempts" -ge 3 ] && __print_error "You are out of luck. Please make sure you have correct credentials and access rights!" && break
     [ ! -z "$cmd_state" ] && __retry_credentials || break
   done
 
   [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
-}
-
-__dry_run_credentials_check()
-{
-  local cmd_name="database-list"
-  local cmd_path='/sites/:site/dbs'
-
-  cmd_path=${cmd_path/:site/$(__get_site_realm)}
-  local cmd_output=$(__issue_curl_command "GET" "$cmd_path")
-  message=$(__parse_json "$cmd_output" message)
-
-  [ "$message" == "Not authorized" ] && EMAIL_ADDRESS="" && PRIVATE_KEY="" && __print_error "Default credentials failed for this site. Please enter new one"
 }
 
 __ensure_valid_credentials()
