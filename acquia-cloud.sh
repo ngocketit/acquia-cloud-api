@@ -183,7 +183,10 @@ DESCRIPTION:
 
 EXAMPLES:
 
-- $0 -add default drupal@activeark.com <key>
+- $0 --add <site> <email.address> <key>
+                              Add the credentials for site <site>
+
+- $0 --add default drupal@activeark.com <key>
                               Add the credentials for default account
 
 - $0 newnokia                 
@@ -332,8 +335,21 @@ __prepare_credentials_store()
 
 __add_credentials()
 {
-  __print_prompt "Site name [default]:" && read SITE_NAME && [ -z "$SITE_NAME" ] && SITE_NAME=$DEFAULT_SITE_NAME
-  __print_prompt_email && read EMAIL_ADDRESS && [ -z "$EMAIL_ADDRESS" ] && EMAIL_ADDRESS=$DEFAULT_EMAIL_ADDRESS
+  shift
+
+  local index=1
+  while [ 1 ]; do
+    [ -z "$1" ] && break
+    [ $index -eq 1 ] && SITE_NAME=$1
+    [ $index -eq 2 ] && EMAIL_ADDRESS=$1
+    [ $index -eq 3 ] && PRIVATE_KEY=$1
+
+    shift
+    let "index+=1"
+  done
+
+  [ -z "$SITE_NAME" ] && __print_prompt "Site name [default]:" && read SITE_NAME && [ -z "$SITE_NAME" ] && SITE_NAME=$DEFAULT_SITE_NAME
+  [ -z "$EMAIL_ADDRESS" ] && __print_prompt_email && read EMAIL_ADDRESS && [ -z "$EMAIL_ADDRESS" ] && EMAIL_ADDRESS=$DEFAULT_EMAIL_ADDRESS
 
   while [ -z "$PRIVATE_KEY" ]; do
     __print_prompt "Private key:" && read PRIVATE_KEY
@@ -840,7 +856,7 @@ __get_options()
       ;;
 
     --add|-a)
-      __add_credentials
+      __add_credentials "$@"
       ;;
 
     --commands|-c)
