@@ -18,7 +18,7 @@ server-max-processes;GET;Calculate a server's PHP max processes record;/sites/:s
 sshkey-list;GET;List a site's SSH keys;/sites/:site/sshkeys
 sshkey-info;GET;Get an SSH key;/sites/:site/sshkeys/:sshkeyid
 sshkey-delete;DELETE;Delete an SSH key;/sites/:site/sshkeys/:sshkeyid;confirm
-sshkey-add;POST;Add an SSH key;/sites/:site/sshkeys
+sshkey-add;POST;Add an SSH key;/sites/:site/sshkeys?nickname=:nickname
 
 [Database]
 database-list;GET;List a site's databases;/sites/:site/dbs
