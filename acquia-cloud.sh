@@ -137,7 +137,64 @@ __check_update()
 
 __print_usage()
 {
-  echo "Usage: $0"
+  cat <<EOF
+Usage: $0 [options] | <site name> <command name> [command arguments]
+
+GENERAL USAGE
+
+-h | --help                   Print out usage
+
+-h | --help [command name]    Print out usage for given command. 
+                              For example: $0 --help database-copy
+
+-u | --update                 Check for available update and update the script
+
+-v | --version                Print the current version number
+
+-l | --list                   List the cached credentials
+
+-a | --add                    Add a new credentials
+
+-c | --commands               List all supported commands
+
+
+COMMAND USAGE
+                              You can run the script for a specific command by 
+                              passing the command name along with site name as arguments. 
+                              The general format is:
+
+                              $0 <site> <command name> [command arguments]
+
+DESCRIPTION:
+
+- site:                       Unique name of the site as on Acquia Cloud. For example, newnokia, nixucom etc
+
+- command name:               Name of the command to be executed. For example, database-copy, task-info etc
+
+- command arguments:          List of required arguments to execute the command. To print out all required arguments
+                              use -h or --help with command name. For example, $0 --help database-copy.
+                              Any missing arguments will be prompted to enter so you don't need to provide the full
+                              list or arguments. 
+                              
+                              For example: $0 newnokia database-copy dev
+                              The source and target environments will be asked to be entered.
+
+EXAMPLES:
+
+- $0 -add default drupal@activeark.com <key>
+                              Add the credentials for default account
+
+- $0 newnokia                 
+                              Only site name is provided, you'll be presenting with a list of commands that you can
+                              select along with prompts for required arguments.
+
+- $0 newnokia task-info       
+                              Get information about a task. Task ID will be prompted for enter.                                
+
+- $0 newnokia database-copy newnokia prod dev
+                              Copy newnokia database from PRODUCTION to DEVELOPMENT
+
+EOF
 }
 
 __print_banner()
@@ -660,40 +717,67 @@ __get_command_params()
   done
 }
 
+__print_command_help()
+{
+  __parse_commands_file
+
+  local script_name=$1 cmd=$2
+  local cmd_index=$(__get_command_index_from_name $cmd)
+  [ $cmd_index -lt 1 -o $cmd_index -gt ${#COMMAND_NAMES[@]} ] && __print_error "Invalid command name!" && exit 1
+
+  echo -e "${txtYellow}${COMMAND_NAMES[$cmd_index]}:${txtOff} ${COMMAND_DESCS[$cmd_index]}"
+  local cmd_path=${COMMAND_PATHS[$cmd_index]//\// }
+  printf "Usage: $script_name <site> <$cmd> "
+
+  for breadcrumb in $cmd_path; do
+    [ -z "$breadcrumb" ] || [ ! -z "$(echo $breadcrumb|grep -E -v "^:")" ] || [ "$breadcrumb" == ":site" ] && continue
+    printf "<${breadcrumb//:/}> "
+  done
+  echo
+}
+
+
+__print_supported_commands()
+{
+  echo "COMMAND LIST"
+  __parse_commands_file verbose
+}
+
 __get_options()
 {
-  if [ $# -eq 1 ]; then
-    case "$1" in
-      --help|-help)
-        __print_usage
-        ;;
+  case "$1" in
+    --help|-h)
+      [ -z "$2" ] && __print_usage || __print_command_help $0 $2
+      ;;
 
-      --update|-update)
-        __check_update verbose
-        ;;
+    --update|-u)
+      __check_update verbose
+      ;;
 
-      --list-cred|-list)
-        __print_cached_credentials
-        ;;
+    --list|-l)
+      __print_cached_credentials
+      ;;
 
-      --version|-version)
-        __print_current_version
-        ;;
+    --version|-v)
+      __print_current_version
+      ;;
 
-      --add-cred|-add)
-        __add_credentials
-        ;;
+    --add|-a)
+      __add_credentials
+      ;;
 
-      -*)
-        __print_error "Invalid option!" && exit 1
-        ;;
+    --commands|-c)
+      __print_supported_commands
+      ;;
 
-      *) 
-        SITE_NAME=$1
-        ;;
-    esac
-    [ -z "$SITE_NAME" ] && exit 0
-  fi
+    -*)
+      __print_error "Invalid option!" && exit 1
+      ;;
+
+    *) 
+      SITE_NAME=$1
+      ;;
+  esac
 
   [ $# -ge 2 ] && SITE_NAME=$1 && COMMAND=$2
 
