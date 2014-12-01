@@ -28,6 +28,7 @@ COMMAND_PATHS=()
 COMMAND_INDEX=1
 COMMAND_ARGS_VALUES=()
 COMMAND_ARGS_NAMES=()
+COMMAND_OPTIONS=()
 
 # Color codes
 txtOff='\e[0m'          # Text Reset
@@ -402,6 +403,20 @@ __parse_command_line()
   COMMAND_METHODS[$COMMAND_INDEX]="$cmd_method"
   COMMAND_DESCS[$COMMAND_INDEX]="$cmd_desc"
   COMMAND_PATHS[$COMMAND_INDEX]="$cmd_path"
+  [ $# -eq 5 ] && [ ! -z "$5" ] && COMMAND_OPTIONS[$COMMAND_INDEX]=$5
+}
+
+__get_command_option()
+{
+  local cmd_options=${COMMAND_OPTIONS[$COMMAND_INDEX]}
+  cmd_options=${cmd_options//|/ }
+  local option=""
+
+  for opt in $cmd_options; do
+    [ "$1" == "$opt" ] && option=$opt && break
+  done
+
+  echo $option
 }
 
 __get_command_index_from_name()
@@ -647,9 +662,9 @@ __execute_command()
   IFS=$'/'
   __ensure_command_params $PREPARED_COMMAND_PATH
   IFS=$old_ifs
-  local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="n"
+  local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="y"
 
-  __print_command_confirmation && read cmd_confirm
+  [ ! -z "$(__get_command_option confirm)" ] && __print_command_confirmation && read cmd_confirm
 
   case "$cmd_confirm" in
     n|N)
@@ -778,6 +793,8 @@ __get_options()
       SITE_NAME=$1
       ;;
   esac
+
+  [ $# -ge 1 ] && [ -z "$SITE_NAME" ] && exit 1
 
   [ $# -ge 2 ] && SITE_NAME=$1 && COMMAND=$2
 

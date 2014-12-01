@@ -4,7 +4,7 @@ task-info;GET;Get a task record;/sites/:site/tasks/:task
 
 [Domains]
 domain-list;GET;List an environment's domains;/sites/:site/envs/:env/domains
-domain-delete;DELETE;Delete a domain;/sites/:site/envs/:env/domains/:domain
+domain-delete;DELETE;Delete a domain;/sites/:site/envs/:env/domains/:domain;confirm
 domain-purge;DELETE;Purge the Varnish cache for a domain;/sites/:site/envs/:env/domains/:domain/cache
 domain-add;POST;Add a domain name;/sites/:site/envs/:env/domains/:domain
 domain-info;GET;Get a domain record;/sites/:site/envs/:env/domains/:domain
@@ -17,7 +17,7 @@ server-max-processes;GET;Calculate a server's PHP max processes record;/sites/:s
 [SSH keys]
 sshkey-list;GET;List a site's SSH keys;/sites/:site/sshkeys
 sshkey-info;GET;Get an SSH key;/sites/:site/sshkeys/:sshkeyid
-sshkey-delete;DELETE;Delete an SSH key;/sites/:site/sshkeys/:sshkeyid
+sshkey-delete;DELETE;Delete an SSH key;/sites/:site/sshkeys/:sshkeyid;confirm
 sshkey-add;POST;Add an SSH key;/sites/:site/sshkeys
 
 [Database]
@@ -25,5 +25,5 @@ database-list;GET;List a site's databases;/sites/:site/dbs
 database-backup;POST;Create a database instance backup;/sites/:site/envs/:env/dbs/:db/backups
 
 [Workflow]
-database-copy;POST;Copy a database from one site environment to another;/sites/:site/dbs/:db/db-copy/:source/:target
-files-copy;POST;Copy files from one site environment to another;/sites/:site/files-copy/:source/:target
+database-copy;POST;Copy a database from one site environment to another;/sites/:site/dbs/:db/db-copy/:source/:target;confirm
+files-copy;POST;Copy files from one site environment to another;/sites/:site/files-copy/:source/:target;confirm
