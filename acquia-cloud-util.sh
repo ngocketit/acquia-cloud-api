@@ -5,7 +5,7 @@
 #               Author: phi.vanngoc@activearkjwt.com          #
 ###############################################################
 VERSION=0.1
-REPOS_URL=http://104.131.99.199/acquia-clould-util.sh
+REPOS_URL=http://104.131.99.199/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=http://104.131.99.199/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
 CREDENTIALS_CACHE_DIR=$HOME/.acquia-cloud-util
