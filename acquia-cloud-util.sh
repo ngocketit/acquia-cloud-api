@@ -22,7 +22,9 @@ PRIVATE_KEY=""
 COMMAND=""
 PREPARED_COMMAND_PATH=""
 COMMAND_BODY=""
+COMMAND_EXTRA_OPTIONS=""
 CHAINED_COMMAND_QUEUE=""
+COMMAND_FLAGS=""
 
 COMMAND_NAMES=()
 COMMAND_METHODS=()
@@ -638,7 +640,14 @@ __issue_curl_command()
   else
     cmd_path=$(echo "${cmd_path}.json")
   fi
-  echo $(curl -s -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${cmd_method} --data "${cmd_body}" ${API_ENDPOINT}${cmd_path})
+
+  if [ -z "$cmd_body" ]; then
+    echo $(curl ${COMMAND_FLAGS} -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${cmd_method} ${API_ENDPOINT}${cmd_path}${COMMAND_EXTRA_OPTIONS})
+    echo "curl ${COMMAND_FLAGS} -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${cmd_method} ${API_ENDPOINT}${cmd_path}${COMMAND_EXTRA_OPTIONS}" >/tmp/command.txt
+  else
+    echo $(curl ${COMMAND_FLAGS} -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${cmd_method} --data "${cmd_body}" ${API_ENDPOINT}${cmd_path}${COMMAND_EXTRA_OPTIONS})
+    echo "curl ${COMMAND_FLAGS} -u $EMAIL_ADDRESS:$PRIVATE_KEY -X ${cmd_method} --data "${cmd_body}" ${API_ENDPOINT}${cmd_path}${COMMAND_EXTRA_OPTIONS}" >/tmp/command.txt
+  fi
 }
 
 __check_async_task_state()
@@ -775,62 +784,95 @@ __execute_command_hook()
   fi
 }
 
+__get_command_body_sshkey_add()
+{
+  local sshkey="" shell_access=true code_access=true blacklist="" envs=""
+
+  while [ -z "$sshkey" ]; do
+    sshkey=$(__prompt_user_input "SSH key file or hash: ")
+    [ -f "$sshkey" ] && sshkey=$(cat "$sshkey")
+  done
+
+  shell_access=$(__prompt_user_input "Allow shell access for this key [yes]? [y/n] ")
+  case "$shell_access" in
+    n|N)
+      shell_access="false"
+      ;;
+
+    *)
+      shell_access="true"
+      ;;
+  esac
+
+  code_access=$(__prompt_user_input "Allow access to code (GIT, SVN) for this key [yes]? [y/n] ")
+  case "$code_access" in
+    n|N)
+      code_access="false"
+      ;;
+
+    *)
+      code_access="true"
+      ;;
+  esac
+
+  envs=$(__prompt_user_input "Disallow access to environments (type dev,test,prod separated by commas) [allow all]? ")
+
+  if [ ! -z "$envs" ]; then
+    envs=${envs//,/ }
+
+    for env in $envs; do
+      blacklist=$(echo "${blacklist}\"$env\",")
+    done
+    blacklist=${blacklist/%,/}
+    blacklist=$(echo "[${blacklist}]")
+    blacklist=",\"blacklist\": ${blacklist}"
+  fi
+
+  COMMAND_BODY="{\"ssh_pub_key\":\"${sshkey}\",\"shell_access\":${shell_access},\"vcs_access\":${code_access}${blacklist}}"
+}
+
+__get_command_body_database_add()
+{
+  local db_name=$(__prompt_user_input "Name of new database: ")
+
+  COMMAND_BODY="{\"db\":\"${db_name}\"}"
+}
+
 __get_command_body()
 {
   COMMAND_BODY=""
+  local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]}
+  local cmd_name_processed=${cmd_name//\-/_}
+  local func_name="__get_command_body_${cmd_name_processed}"
 
-  case "${COMMAND_NAMES[$COMMAND_INDEX]}" in
-    sshkey-add)
-      local sshkey="" shell_access=true code_access=true blacklist="" envs=""
+  type $func_name >/dev/null 2>&1
+  [ $? -eq 0 ] && $func_name
+}
 
-      while [ -z "$sshkey" ]; do
-        sshkey=$(__prompt_user_input "SSH key file or hash: ")
-        [ -f "$sshkey" ] && sshkey=$(cat "$sshkey")
-      done
+__get_command_extra_options()
+{
+  COMMAND_EXTRA_OPTIONS=""
+  local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]}
+  local cmd_name_processed=${cmd_name//\-/_}
+  local func_name="__get_command_extra_options_${cmd_name_processed}"
 
-      shell_access=$(__prompt_user_input "Allow shell access for this key [yes]? [y/n] ")
-      case "$shell_access" in
-        n|N)
-          shell_access="false"
-          ;;
+  type $func_name >/dev/null 2>&1
+  [ $? -eq 0 ] && $func_name
+}
 
-        *)
-          shell_access="true"
-          ;;
-      esac
-
-      code_access=$(__prompt_user_input "Allow access to code (GIT, SVN) for this key [yes]? [y/n] ")
-      case "$code_access" in
-        n|N)
-          code_access="false"
-          ;;
-
-        *)
-          code_access="true"
-          ;;
-      esac
-
-      envs=$(__prompt_user_input "Disallow access to environments (type dev,test,prod separated by commas) [allow all]? ")
-
-      if [ ! -z "$envs" ]; then
-        envs=${envs//,/ }
-
-        for env in $envs; do
-          blacklist=$(echo "${blacklist}\"$env\",")
-        done
-        blacklist=${blacklist/%,/}
-        blacklist=$(echo "[${blacklist}]")
-        blacklist=",\"blacklist\": ${blacklist}"
-      fi
-
-      COMMAND_BODY="{\"ssh_pub_key\":\"${sshkey}\",\"shell_access\":${shell_access},\"vcs_access\":${code_access}${blacklist}}"
-      ;;
-  esac
+__get_command_extra_options_database_backup_download()
+{
+  local saved_file_path=$(__prompt_user_input "Save database backup to: ")
+  COMMAND_EXTRA_OPTIONS=" -o $saved_file_path"
 }
 
 __execute_command()
 {
   __ensure_command_params $PREPARED_COMMAND_PATH
+
+  __get_command_body
+  __get_command_extra_options
+  __get_command_flags
 
   local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="y"
 
@@ -843,7 +885,6 @@ __execute_command()
   esac
 
   __execute_command_hook pre
-  __get_command_body
 
   echo "${COMMAND_DESCS[$COMMAND_INDEX]}"
 
@@ -858,6 +899,22 @@ __execute_command()
   [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
 
   __execute_command_hook post
+}
+
+__get_command_flags_database_backup_download()
+{
+  COMMAND_FLAGS="-L"
+}
+
+__get_command_flags()
+{
+  COMMAND_FLAGS="-s"
+  local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]}
+  local cmd_name_processed=${cmd_name//\-/_}
+  local func_name="__get_command_flags_${cmd_name_processed}"
+
+  type $func_name >/dev/null 2>&1
+  [ $? -eq 0 ] && $func_name
 }
 
 __ensure_valid_credentials()
