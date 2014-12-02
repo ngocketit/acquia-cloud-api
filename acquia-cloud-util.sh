@@ -22,6 +22,7 @@ PRIVATE_KEY=""
 COMMAND=""
 PREPARED_COMMAND_PATH=""
 COMMAND_BODY=""
+CHAINED_COMMAND_QUEUE=""
 
 COMMAND_NAMES=()
 COMMAND_METHODS=()
@@ -580,6 +581,14 @@ __ensure_command_params()
       :nickname)
         __replace_command_pattern $param $(__prompt_user_input "SSH key nick name: ")
         ;;
+
+      :branch)
+        __replace_command_pattern $param $(__prompt_user_input "GIT or SVN tag/branch name: ")
+        ;;
+
+      :action)
+        __replace_command_pattern $param $(__prompt_user_input "Enable or disable live dev [enable,disable]: ")
+        ;;
     esac
   done
 }
@@ -701,6 +710,70 @@ __print_command_confirmation()
   __print_prompt "Do you want to continue? [y/n]"
 }
 
+__set_chained_command_queue()
+{
+  CHAINED_COMMAND_QUEUE="chained"
+}
+
+__clear_chained_command_queue()
+{
+  CHAINED_COMMAND_QUEUE=""
+}
+
+__preparare_hooked_command()
+{
+  local cmd_name=$1
+  COMMAND_INDEX=$(__get_command_index_from_name $cmd_name)
+  shift
+
+  __init_command_path
+  __get_command_params $PREPARED_COMMAND_PATH $SITE_NAME $cmd_name $@
+
+  # Mark that further command to be executed
+  __set_chained_command_queue
+}
+
+__pre_database_copy()
+{
+  local database_name=${COMMAND_ARGS_VALUES[2]}
+  local target_env=${COMMAND_ARGS_VALUES[4]}
+  __preparare_hooked_command database-backup $target_env $database_name
+}
+
+__post_database_copy()
+{
+  local target_env=${COMMAND_ARGS_VALUES[4]}
+
+  # Enable shield on dev/test environments
+  if [ "$target_env" == "dev" -o "$target_env" == "test" ]; then
+    __print_warning "Enable shield module on $(__to_uppercase $target_env)"
+    drush @${SITE_NAME}.${target_env} en shield --yes
+  fi
+
+  # No command to follow this so clear the queue
+  __clear_chained_command_queue
+}
+
+__execute_command_hook()
+{
+  local hook=$1
+  local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]}
+  local cmd_name_processed=${cmd_name//\-/_}
+  local func_name="__${hook}_${cmd_name_processed}"
+  type $func_name >/dev/null 2>&1
+
+  if [ $? -eq 0 ]; then
+    # Save context of old command
+    local old_cmd_index=$COMMAND_INDEX
+    local old_cmd_path=$PREPARED_COMMAND_PATH
+
+    $func_name && [ ! -z "$CHAINED_COMMAND_QUEUE" ] && __execute_command
+
+    # Restore old commands 
+    COMMAND_INDEX=$old_cmd_index
+    PREPARED_COMMAND_PATH=$old_cmd_path
+  fi
+}
 
 __get_command_body()
 {
@@ -757,7 +830,6 @@ __get_command_body()
 
 __execute_command()
 {
-  echo "${COMMAND_DESCS[$COMMAND_INDEX]}"
   __ensure_command_params $PREPARED_COMMAND_PATH
 
   local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="y"
@@ -770,7 +842,10 @@ __execute_command()
       ;;
   esac
 
+  __execute_command_hook pre
   __get_command_body
+
+  echo "${COMMAND_DESCS[$COMMAND_INDEX]}"
 
   while [ 1 ]; do
     let "num_attempts+=1"
@@ -781,6 +856,8 @@ __execute_command()
   done
 
   [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
+
+  __execute_command_hook post
 }
 
 __ensure_valid_credentials()
