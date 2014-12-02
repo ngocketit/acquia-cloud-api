@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@activearkjwt.com          #
 ###############################################################
-VERSION=0.1
+VERSION=0.2
 REPOS_URL=http://104.131.99.199/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=http://104.131.99.199/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
@@ -100,6 +100,7 @@ __get_new_version()
     local version=$(egrep "VERSION=[0-9\.]+" $tmp_file)
     version=${version#VERSION=}
     [ ! -z "$version" ] && [ "$version" != "$VERSION" ] &&  echo $tmp_file || echo ""
+    rm $tmp_file >/dev/null 2>&1
   else
     echo ""
   fi
