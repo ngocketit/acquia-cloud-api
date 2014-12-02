@@ -85,9 +85,12 @@ __print_command_status()
 
 __do_self_update()
 {
-  sudo mv $1 $INSTALL_PATH; [ -f $INSTALL_PATH ]; sudo chmod a+x $INSTALL_PATH; local status=$?
+  sudo mv "$1" $INSTALL_PATH && [ -f $INSTALL_PATH ] && sudo chmod a+x $INSTALL_PATH
+  local status=$?
   __print_command_status "Self update"
   __download_commands_file
+
+  rm $tmp_file >/dev/null 2>&1
   [ $status -eq 0 ] && __print_info "You need to relaunch the script, quit now!" && exit
 }
 
@@ -100,7 +103,6 @@ __get_new_version()
     local version=$(egrep "VERSION=[0-9\.]+" $tmp_file)
     version=${version#VERSION=}
     [ ! -z "$version" ] && [ "$version" != "$VERSION" ] &&  echo $tmp_file || echo ""
-    rm $tmp_file >/dev/null 2>&1
   else
     echo ""
   fi
@@ -137,7 +139,7 @@ __check_update()
 
   local new_version=$(__get_new_version)
   if [ ! -z "$new_version" ]; then
-    __confirm_update && __do_self_update $new_version || [ "$1" == "verbose" ] && exit
+    __confirm_update && __do_self_update "$new_version" || [ "$1" == "verbose" ] && exit
   else
     [ "$1" == "verbose" ] && __print_warning "No update available" && exit
   fi
@@ -1036,6 +1038,6 @@ __get_options()
   __get_command_params $PREPARED_COMMAND_PATH "$@"
 }
 
-__check_update
+[ "$1" != "--update" -a "$1" != "-u" ] && __check_update
 __get_options "$@"
 __execute_command
