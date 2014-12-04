@@ -13,6 +13,7 @@ DEFAULT_EMAIL_ADDRESS=drupal@activeark.com
 API_ENDPOINT=https://cloudapi.acquia.com/v1
 COMMAND_FILE_PATH=${CREDENTIALS_CACHE_DIR}/.acquia-cloud-commands
 DEFAULT_SITE_NAME=default
+COMMAND_RESULT_OUTPUT=/tmp/last_cmd
 
 CHOSEN_CACHE_FILE=""
 
@@ -869,6 +870,83 @@ __get_command_extra_options_database_backup_download()
   COMMAND_EXTRA_OPTIONS=" -o $saved_file_path"
 }
 
+__pre_varnish_purge()
+{
+  __preparare_hooked_command server-list prod
+}
+
+__purge_varnish_elb()
+{
+  local server=$1 url=$2
+  local domain=$(echo $url | cut -d'/' -f3)
+  local path=$(echo $url| awk -F $domain/ '{print $2}')
+
+  curl -s -D - -X PURGE -H "X-Acquia-Purge: $SITE_NAME" --compress -H "Host: $domain" http://${server}.prod.hosting.acquia.com/$path -o /dev/null
+}
+
+__command_varnish_purge()
+{
+  local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
+  local balancers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"bal-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+
+  [ -z "$balancers" ] && __print_error "No load balancers found" && exit 1
+
+  local paths=() path="" index=1
+
+  # If URLs are passed as command arguments
+  if [ $# -ge 3 ]; then
+    shift && shift
+
+    # If the argument is actually a file path
+    if [ $# -eq 1 -a -f $1 ]; then
+      while read path; do
+        paths[$index]=$path
+        let "index+=1"
+      done < $1
+    else
+      while [ ! -z "$1" ]; do
+        paths[$index]=$1
+        let "index+=1"
+        shift
+      done
+    fi
+  else
+    __print_warning "Enter the URLs you want to purge. Press enter twice to finish inputting"
+
+    while read path; do
+      [ -z "$path" ] && break
+      paths[$index]=$path
+      let "index+=1"
+    done
+  fi
+
+  [ ${#paths[@]} -eq 0 ] && __print_error "No path to purge" && exit 1
+
+  for server in $balancers; do
+    __print_info "# # # Server: $server # # #"
+
+    for (( i=1; i <= ${#paths[@]}; i++ )); do
+      __print_warning "# # # Path: ${paths[$i]} # # #"
+      __purge_varnish_elb $server ${paths[$i]}
+    done
+  done
+}
+
+__is_non_api_command()
+{
+  echo $(__get_command_option "non-api")
+}
+
+__execute_non_api_command()
+{
+  local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]}
+  local cmd_name_processed=${cmd_name//\-/_}
+  local func_name="__command_${cmd_name_processed}"
+  type $func_name >/dev/null 2>&1
+
+  [ $? -eq 0 ] && $func_name "$@"
+}
+
 __execute_command()
 {
   __ensure_command_params $PREPARED_COMMAND_PATH
@@ -891,15 +969,21 @@ __execute_command()
 
   echo "${COMMAND_DESCS[$COMMAND_INDEX]}"
 
-  while [ 1 ]; do
-    let "num_attempts+=1"
-    cmd_output=$(__issue_curl_command ${COMMAND_METHODS[$COMMAND_INDEX]} $PREPARED_COMMAND_PATH "$COMMAND_BODY")
-    __beautify_json_output "$cmd_output" && cmd_state=$(__is_unauthorized "$cmd_output")
-    [ "$num_attempts" -ge 3 ] && __print_error "You are out of luck. Please make sure you have correct credentials and access rights!" && break
-    [ ! -z "$cmd_state" ] && __retry_credentials || break
-  done
+  if [ ! -z "$(__is_non_api_command)" ]; then
+    __execute_non_api_command "$@"
+  else
+    while [ 1 ]; do
+      let "num_attempts+=1"
+      cmd_output=$(__issue_curl_command ${COMMAND_METHODS[$COMMAND_INDEX]} $PREPARED_COMMAND_PATH "$COMMAND_BODY")
+      __beautify_json_output "$cmd_output" && cmd_state=$(__is_unauthorized "$cmd_output")
+      [ "$num_attempts" -ge 3 ] && __print_error "You are out of luck. Please make sure you have correct credentials and access rights!" && break
+      [ ! -z "$cmd_state" ] && __retry_credentials || break
+    done
 
-  [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
+    echo "$cmd_output" > $COMMAND_RESULT_OUTPUT
+
+    [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
+  fi
 
   __execute_command_hook post
 }
@@ -933,7 +1017,7 @@ __ensure_valid_credentials()
 
 __get_command_params()
 {
-  local cmd_path=$1
+  local cmd_path=${1//=/ }
   local cmd_parts=${cmd_path//\// }
   shift
 
@@ -1035,9 +1119,11 @@ __get_options()
     __parse_commands_file && COMMAND_INDEX=$(__get_command_index_from_name "$COMMAND") && __init_command_path
   fi
 
+  [ $COMMAND_INDEX -lt 1 -o $COMMAND_INDEX -gt ${#COMMAND_NAMES[@]} ] && __print_error "Invalid command!" && exit 1
+
   __get_command_params $PREPARED_COMMAND_PATH "$@"
 }
 
 [ "$1" != "--update" -a "$1" != "-u" ] && __check_update
 __get_options "$@"
-__execute_command
+__execute_command "$@"
