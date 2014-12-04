@@ -1051,12 +1051,29 @@ __print_command_help()
 
   echo -e "${txtYellow}${COMMAND_NAMES[$cmd_index]}:${txtOff} ${COMMAND_DESCS[$cmd_index]}"
   local cmd_path=${COMMAND_PATHS[$cmd_index]//\// }
-  printf "Usage: $script_name <site> <$cmd> "
+  printf "Usage: $script_name <site> $cmd "
 
-  for breadcrumb in $cmd_path; do
-    [ -z "$breadcrumb" ] || [ ! -z "$(echo $breadcrumb|grep -E -v "^:")" ] || [ "$breadcrumb" == ":site" ] && continue
-    printf "<${breadcrumb//:/}> "
-  done
+  case "$cmd" in
+    varnish-purge)
+      printf "[<URLs> | <file path containing URLs to be purged>]"
+      echo
+      cat <<EOF
+
+Examples:
+
+    - $script_name site_name varnish-purge
+    - $script_name site_name varnish-purge http://site.name.com/path1 http://site.name.com/path2
+    - $script_name site_name varnish-purge /tmp/paths.txt
+EOF
+      ;;
+
+    *)
+      for breadcrumb in $cmd_path; do
+        [ -z "$breadcrumb" ] || [ ! -z "$(echo $breadcrumb|grep -E -v "^:")" ] || [ "$breadcrumb" == ":site" ] && continue
+        printf "<${breadcrumb//:/}> "
+      done
+      ;;
+  esac
   echo
 }
 
