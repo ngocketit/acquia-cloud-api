@@ -8,7 +8,7 @@ task-info;GET;Get a task record;/sites/:site/tasks/:task
 [Domains]
 domain-list;GET;List an environment's domains;/sites/:site/envs/:env/domains
 domain-delete;DELETE;Delete a domain;/sites/:site/envs/:env/domains/:domain;confirm
-domain-purge;DELETE;Purge the Varnish cache for a domain;/sites/:site/envs/:env/domains/:domain/cache
+domain-purge;DELETE;Purge the Varnish cache for a domain;/sites/:site/envs/:env/domains/:domain/cache;confirm
 domain-add;POST;Add a domain name;/sites/:site/envs/:env/domains/:domain
 domain-info;GET;Get a domain record;/sites/:site/envs/:env/domains/:domain
 
@@ -32,12 +32,12 @@ database-backup-delete;DELETE;Delete a site environment database instance backup
 database-backup-list;GET;List a site environment's database instance backups;/sites/:site/envs/:env/dbs/:db/backups
 database-backup-info;GET;Get details about a database instance backup;/sites/:site/envs/:env/dbs/:db/backups/:backup
 database-backup-download;GET;Download a database instance backup from server;/sites/:site/envs/:env/dbs/:db/backups/:backup/download
-database-backup-restore;POST;Restore a site environment database instance backup;/sites/:site/envs/:env/dbs/:db/backups/:backup/restore
+database-backup-restore;POST;Restore a site environment database instance backup;/sites/:site/envs/:env/dbs/:db/backups/:backup/restore;confirm
 
 [Workflow]
 database-copy;POST;Copy a database from one site environment to another;/sites/:site/dbs/:db/db-copy/:source/:target;confirm
 files-copy;POST;Copy files from one site environment to another;/sites/:site/files-copy/:source/:target;confirm
-code-deploy;POST;Deploy a specific VCS branch or tag to an environment;/sites/:site/envs/:env/code-deploy?path=:branch
+code-deploy;POST;Deploy a specific VCS branch or tag to an environment;/sites/:site/envs/:env/code-deploy?path=:branch;confirm
 
 [Sites and Environments]
 site-list;GET;List all sites accessible by the caller;/sites
@@ -45,3 +45,6 @@ site-info;GET;Get a site record;/sites/:site
 site-env-list;GET;List a site's environments;/sites/:site/envs
 env-info;GET;Get an environment record;/sites/:site/envs/:env
 env-livedev;POST;Configure Live Development on an environment;/sites/:site/envs/:env/livedev/:action;confirm
+
+[Varnish]
+varnish-purge;PURGE;Purge Varnish cache for certains URLs;http://server.prod.hosting.acquia.com;non-api
