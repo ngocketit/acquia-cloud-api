@@ -48,3 +48,6 @@ env-livedev;POST;Configure Live Development on an environment;/sites/:site/envs/
 
 [Varnish]
 varnish-purge;PURGE;Purge Varnish cache for certains URLs;http://server.prod.hosting.acquia.com;non-api
+
+[Memcache]
+memcache-flush;GET;Flush memcache server;http://server.prod.hosting.acquia.com;non-api

@@ -2,11 +2,11 @@
 
 ###############################################################
 #               Acquia Cloud Utility	               	      #
-#               Author: phi.vanngoc@activearkjwt.com          #
+#               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.4
-REPOS_URL=http://104.131.99.199/acquia-cloud-util.sh
-COMMANDS_REPOS_URL=http://104.131.99.199/acquia-cloud-commands
+VERSION=0.5
+REPOS_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/acquia-cloud-util.sh
+COMMANDS_REPOS_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
 CREDENTIALS_CACHE_DIR=$HOME/.acquia-cloud-util
 DEFAULT_EMAIL_ADDRESS=drupal@activeark.com
@@ -14,6 +14,7 @@ API_ENDPOINT=https://cloudapi.acquia.com/v1
 COMMAND_FILE_PATH=${CREDENTIALS_CACHE_DIR}/.acquia-cloud-commands
 DEFAULT_SITE_NAME=default
 COMMAND_RESULT_OUTPUT=/tmp/last_cmd
+ALL_ENVS=(dev test prod)
 
 CHOSEN_CACHE_FILE=""
 
@@ -26,6 +27,8 @@ COMMAND_BODY=""
 COMMAND_EXTRA_OPTIONS=""
 CHAINED_COMMAND_QUEUE=""
 COMMAND_FLAGS=""
+
+MEMCACHE_FLUSH_EVN=""
 
 COMMAND_NAMES=()
 COMMAND_METHODS=()
@@ -382,8 +385,8 @@ __add_credentials()
 
 __get_environment()
 {
-  local environments=(dev stg prod) choice
-  select choice in "${environments[@]}"; do
+  local choice
+  select choice in "${ALL_ENVS[@]}"; do
     case $REPLY in
       1|2|3)
         break
@@ -395,6 +398,14 @@ __get_environment()
 
   [ "$choice" == "stg" ] && choice="test"
   echo $choice
+}
+
+__is_valid_environment()
+{
+  for env in "${ALL_ENVS[@]}"; do
+    [ "$env" = "$1" ] && echo "true" && break
+  done
+  echo ""
 }
 
 __download_commands_file()
@@ -770,6 +781,13 @@ __post_database_copy()
 __execute_command_hook()
 {
   local hook=$1
+  # Remove the hook name (type) from the args list
+  shift
+
+  # Then remove the site name & command name
+  shift
+  shift
+
   local cmd_name=${COMMAND_NAMES[$COMMAND_INDEX]}
   local cmd_name_processed=${cmd_name//\-/_}
   local func_name="__${hook}_${cmd_name_processed}"
@@ -780,7 +798,8 @@ __execute_command_hook()
     local old_cmd_index=$COMMAND_INDEX
     local old_cmd_path=$PREPARED_COMMAND_PATH
 
-    $func_name && [ ! -z "$CHAINED_COMMAND_QUEUE" ] && __execute_command
+    # Pass all command args to the hook function
+    $func_name "$@" && [ ! -z "$CHAINED_COMMAND_QUEUE" ] && __execute_command
 
     # Restore old commands 
     COMMAND_INDEX=$old_cmd_index
@@ -932,6 +951,47 @@ __command_varnish_purge()
   done
 }
 
+__issue_ssh_command()
+{
+  local env=$1 server=$2 cmd=$3
+  ssh ${SITE_NAME}.${env}@${server}.prod.hosting.acquia.com "$cmd"
+}
+
+__do_memcache_flush()
+{
+  __issue_ssh_command $1 $2 "/bin/echo -e 'flush_all\nquit' | nc -q1 ${2}.prod.hosting.acquia.com 11211"
+}
+
+__pre_memcache_flush()
+{
+  __print_info "Select the environment on which to flush the memcache"
+  MEMCACHE_FLUSH_EVN=""
+  [ $# -ge 1 ] && MEMCACHE_FLUSH_EVN=$1
+  ([ -z "$MEMCACHE_FLUSH_EVN" ] || [ -z "$(__is_valid_environment $MEMCACHE_FLUSH_EVN)" ]) && MEMCACHE_FLUSH_EVN=$(__get_environment)
+  __preparare_hooked_command server-list $MEMCACHE_FLUSH_EVN
+}
+
+__command_memcache_flush()
+{
+  local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
+  local staging_servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"staging-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+  local web_servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"web-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+
+  if [ ! -z "$staging_servers" ]; then
+    for server in $staging_servers; do
+      __print_info "Flushing memcache for server: $server.prod.hosting.acquia.com"
+      __do_memcache_flush $MEMCACHE_FLUSH_EVN $server
+    done
+  fi
+
+  if [ ! -z "$web_servers" ]; then
+    for server in $web_servers; do
+      __print_info "Flushing memcache for server: $server.prod.hosting.acquia.com"
+      __do_memcache_flush $MEMCACHE_FLUSH_EVN $server
+    done
+  fi
+}
+
 __is_non_api_command()
 {
   echo $(__get_command_option "non-api")
@@ -965,7 +1025,7 @@ __execute_command()
       ;;
   esac
 
-  __execute_command_hook pre
+  __execute_command_hook pre "$@"
 
   echo "${COMMAND_DESCS[$COMMAND_INDEX]}"
 
@@ -985,7 +1045,7 @@ __execute_command()
     [ -z "$cmd_state" ] && __save_credentials && __wait_for_async_task "$cmd_output"
   fi
 
-  __execute_command_hook post
+  __execute_command_hook post "$@"
 }
 
 __get_command_flags_database_backup_download()
@@ -1141,6 +1201,7 @@ __get_options()
   __get_command_params $PREPARED_COMMAND_PATH "$@"
 }
 
-[ "$1" != "--update" -a "$1" != "-u" ] && __check_update
+# Disable auto check for update
+#[ "$1" != "--update" -a "$1" != "-u" ] && __print_info "Checking for the update" && __check_update
 __get_options "$@"
 __execute_command "$@"
