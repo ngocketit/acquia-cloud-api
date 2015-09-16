@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.5
+VERSION=0.6
 REPOS_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
@@ -15,6 +15,7 @@ COMMAND_FILE_PATH=${CREDENTIALS_CACHE_DIR}/.acquia-cloud-commands
 DEFAULT_SITE_NAME=default
 COMMAND_RESULT_OUTPUT=/tmp/last_cmd
 ALL_ENVS=(dev test prod)
+SERVER_FQDN_SUFFIX=.prod.hosting.acquia.com
 
 CHOSEN_CACHE_FILE=""
 
@@ -954,7 +955,17 @@ __command_varnish_purge()
 __issue_ssh_command()
 {
   local env=$1 server=$2 cmd=$3
+  server=${server//$SERVER_FQDN_SUFFIX/}
   ssh ${SITE_NAME}.${env}@${server}.prod.hosting.acquia.com "$cmd"
+}
+
+__get_memcache_servers()
+{
+  local env=$1 output=$(drush @${SITE_NAME}.${env} vget memcache_servers)
+  output=${output//memcache_servers:/}
+  output=${output//: default/}
+  output=${output//\'/}
+  echo $output
 }
 
 __do_memcache_flush()
@@ -964,10 +975,9 @@ __do_memcache_flush()
 
 __pre_memcache_flush()
 {
-  __print_info "Select the environment on which to flush the memcache"
   MEMCACHE_FLUSH_EVN=""
   [ $# -ge 1 ] && MEMCACHE_FLUSH_EVN=$1
-  ([ -z "$MEMCACHE_FLUSH_EVN" ] || [ -z "$(__is_valid_environment $MEMCACHE_FLUSH_EVN)" ]) && MEMCACHE_FLUSH_EVN=$(__get_environment)
+  ([ -z "$MEMCACHE_FLUSH_EVN" ] || [ -z "$(__is_valid_environment $MEMCACHE_FLUSH_EVN)" ]) && __print_info "Select the environment on which to flush the memcache" && MEMCACHE_FLUSH_EVN=$(__get_environment)
   __preparare_hooked_command server-list $MEMCACHE_FLUSH_EVN
 }
 
@@ -992,6 +1002,73 @@ __command_memcache_flush()
   fi
 }
 
+__memcache_stats()
+{
+  local env=$1
+
+  __print_info "Retrieving memcache servers list"
+  local servers=$(__get_memcache_servers)
+
+  [ -z "$servers" ] && __print_info "Can not get memcache servers or there is no memcache server. Abort" && exit 1
+
+  local serversArr=() portsArr=() index=1 oldIFS=""
+
+  for server in $servers; do
+    oldIFS="$IFS"
+    IFS=':' read -ra parts <<< "$server"
+    serversArr[$index]=${parts[0]}
+    portsArr[$index]=${parts[1]}
+    let index++
+  done
+
+  if [ ${#serversArr[@]} -eq 1 ]; then
+    index=1
+  else
+    __print_info "Select memcache server to see the statistics"
+    select server in "${serversArr[@]}"; do
+      index=$REPLY
+      [ $REPLY -le 1 ] || [ $REPLY -ge ${#serversArr[@]} ] && break
+    done
+  fi
+
+  __print_info "Memcache stats for server: ${serversArr[$index]}"
+  local memcache_cmd=$2
+  local ssh_cmd="/bin/echo -e 'stats\nquit' | nc -q1 ${serversArr[$index]} ${portsArr[$index]}"
+
+  [ "$memcache_cmd" = "watch" ] && ssh_cmd="watch -d -n 10 \"$ssh_cmd\""
+
+  __issue_ssh_command $env ${serversArr[$index]} "$ssh_cmd"
+}
+
+__command_memcache_stats()
+{
+  local env=''
+
+  # Remove site name & command name from arguments list
+  shift && shift && [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && env=$1 || env=$(__get_environment)
+
+  __memcache_stats $env stats
+}
+
+__command_memcache_monitor()
+{
+  local env=''
+
+  # Remove site name & command name from arguments list
+  shift && shift && [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && env=$1 || env=$(__get_environment)
+
+  __memcache_stats $env watch
+}
+
+__command_cron_debug()
+{
+  local env=""
+  [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && env=$1 || env=$(__get_environment)
+  __print_info "Debugging cron for $(__to_uppercase $env) environment"
+
+  drush @${SITE_NAME}.${env} php-eval 'global $timers; $return = $args = array();foreach (module_implements("cron") as $module) {  $function = $module . "_cron"; print($function ." - ");  timer_start($function); $result = call_user_func_array($function, $args);  if (isset($result) && is_array($result)) { $return = array_merge_recursive($return, $result); }  else if (isset($result)) { $return[] = $result; }  timer_stop  ($function);  print($timers[$function]["time"] ."\r\n");}'
+}
+
 __is_non_api_command()
 {
   echo $(__get_command_option "non-api")
@@ -1004,6 +1081,7 @@ __execute_non_api_command()
   local func_name="__command_${cmd_name_processed}"
   type $func_name >/dev/null 2>&1
 
+  # Don't shift && shift here. Pls check later if we should
   [ $? -eq 0 ] && $func_name "$@"
 }
 

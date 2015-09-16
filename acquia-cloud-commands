@@ -51,3 +51,8 @@ varnish-purge;PURGE;Purge Varnish cache for certains URLs;http://server.prod.hos
 
 [Memcache]
 memcache-flush;GET;Flush memcache server;http://server.prod.hosting.acquia.com;non-api
+memcache-stats;GET;Show memcache statistics;http://server.prod.hosting.acquia.com;non-api
+memcache-monitor;GET;Real-time monitor memcache statistics;http://server.prod.hosting.acquia.com;non-api
+
+[Others]
+cron-debug;GET;Debug cron to see what cron hooks are consuming most of the time;http://server.prod.hosting.acquia.com;non-api
