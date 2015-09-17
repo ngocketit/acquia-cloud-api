@@ -40,6 +40,19 @@ COMMAND_ARGS_VALUES=()
 COMMAND_ARGS_NAMES=()
 COMMAND_OPTIONS=()
 
+# Site dump variables
+DUMP_PARAMS_CACHE_DIR=$HOME/${CREDENTIALS_CACHE_DIR}/.dump_params
+DUMP_SITE_NAME=""
+DUMP_ENVIRONMENT=""
+DUMP_LOCAL_DOCROOT=""
+DUMP_MULTISITE=""
+DUMP_LOCAL_SITE_URL=""
+DUMP_REMOTE_SITE_URL=""
+DUMP_SUB_SITE_NAME=""
+DUMP_SERVER_NAME=""
+
+DUMP_DB_UPDATE_RET=1
+
 # Color codes
 txtOff='\e[0m'          # Text Reset
 txtBlack='\e[0;30m'     # Black - Regular
@@ -959,6 +972,14 @@ __issue_ssh_command()
   ssh ${SITE_NAME}.${env}@${server}.prod.hosting.acquia.com "$cmd"
 }
 
+__check_server_is_live()
+{
+  ping -c 1 $1 >/dev/null 2>&1
+  echo $?
+}
+
+######################################################## Memcache commands #######################################################
+
 __get_memcache_servers()
 {
   local env=$1 output=$(drush @${SITE_NAME}.${env} vget memcache_servers)
@@ -1060,6 +1081,8 @@ __command_memcache_monitor()
   __memcache_stats $env watch
 }
 
+######################################################## Cron commands #######################################################
+
 __command_cron_debug()
 {
   local env=""
@@ -1068,6 +1091,345 @@ __command_cron_debug()
 
   drush @${SITE_NAME}.${env} php-eval 'global $timers; $return = $args = array();foreach (module_implements("cron") as $module) {  $function = $module . "_cron"; print($function ." - ");  timer_start($function); $result = call_user_func_array($function, $args);  if (isset($result) && is_array($result)) { $return = array_merge_recursive($return, $result); }  else if (isset($result)) { $return[] = $result; }  timer_stop  ($function);  print($timers[$function]["time"] ."\r\n");}'
 }
+
+######################################################## Site dump commands #######################################################
+
+__dump_get_param_cache_file()
+{
+  echo "$DUMP_PARAMS_CACHE_DIR/$SITE_NAME-$DUMP_ENVIRONMENT"
+}
+
+__dump_reuse_existing_params()
+{
+  local cache_file=$(__dump_get_param_cache_file)
+
+  if [ -f "$cache_file" ]; then
+    local params=$(cat $cache_file)
+
+    if [ ! -z "$params" ]; then
+      __print_info "Cached settings found, reusing following params"
+      source $cache_file
+    fi
+  fi
+}
+
+__dump_get_local_docroot()
+{
+  __print_prompt "Local site docroot path: "
+  read DUMP_LOCAL_DOCROOT
+}
+
+__dump_get_server_name()
+{
+  __print_prompt "Name of the server to dump from (for example, staging-4605): "
+  read DUMP_SERVER_NAME
+}
+
+__dump_get_environment()
+{
+  __print_info "Environment to dump from:"
+  DUMP_ENVIRONMENT=$(__get_environment)
+}
+
+
+__dump_get_local_site_url()
+{
+  __print_prompt "Local site URL: "
+  read DUMP_LOCAL_SITE_URL
+}
+
+
+__dump_get_remote_site_url()
+{
+  __print_prompt "Remote site URL: "
+  read DUMP_REMOTE_SITE_URL
+}
+
+__dump_get_sub_site_name()
+{
+  __print_prompt "Name of the subsite in the multisite setup: "
+  read DUMP_SUB_SITE_NAME
+}
+
+__dump_get_multisite()
+{
+  __print_prompt "Is the site multisite" "[y/n]"
+  read DUMP_MULTISITE
+
+  if [ "$DUMP_MULTISITE" != "y" -a "$DUMP_MULTISITE" != "n" ]; then
+    DUMP_MULTISITE="n"
+  fi 
+
+  if [ "$DUMP_MULTISITE" == "y" ]; then
+    [ -z "$DUMP_REMOTE_SITE_URL" ] && __dump_get_remote_site_url
+    [ -z "$DUMP_LOCAL_SITE_URL" ] && __dump_get_local_site_url
+    [ -z "$DUMP_SUB_SITE_NAME" ] && __dump_get_sub_site_name
+  fi
+}
+
+__dump_get_drush_multisite_opt()
+{
+  local multisite_opt=""
+
+  if [ "$DUMP_MULTISITE" == "y" ]; then
+    local uri=$DUMP_LOCAL_SITE_URL
+
+    if [ $# -eq 1 ]; then
+      uri=$1
+    fi
+    multisite_opt="--uri=$uri"
+  fi
+
+  echo $multisite_opt
+}
+
+__dump_issue_local_drush_command()
+{
+  local multisite_opt_local=$(__dump_get_drush_multisite_opt)
+  drush $multisite_opt_local $1 >/dev/null 2>&1
+  return $?
+}
+
+__dump_put_site_offline()
+{
+  cd $DUMP_LOCAL_DOCROOT
+  __print_command_status "Put site into maintenance mode" $(__issue_local_drush_command "vset maintenance_mode 1")
+}
+
+__dump_confirm_options()
+{
+  local quit="" index i=1
+  local labels=() values=() value
+
+  labels[1]="Environment"
+  labels[2]="Server name"
+  labels[3]="Multisite"
+  labels[4]="Subsite name"
+  labels[5]="Remote site URL"
+  labels[6]="Local site URL"
+  labels[7]="Local docroot"
+
+  while [ -z "$quit" ]; do
+    __print_info "Enter the number of your choice to modify the information"
+
+    values[1]="$DUMP_ENVIRONMENT"
+    values[2]="$DUMP_SERVER_NAME"
+    values[3]="$DUMP_MULTISITE"
+    values[4]="$DUMP_SUB_SITE_NAME"
+    values[5]="$DUMP_REMOTE_SITE_URL"
+    values[6]="$DUMP_LOCAL_SITE_URL"
+    values[7]="$DUMP_LOCAL_DOCROOT"
+
+    for (( i=1; i<=${#labels[@]}; i++ )); do
+      value=${values[$i]}
+      [ -z "$value" ] && value="N/A" || ([ "$value" = "y" ] && value="Yes" || [ "$value" = "n" ] && value="No")
+      echo -e "${i}) ${txtYellow}${labels[$i]}${txtOff}: ${txtWhite}${value}${txtOff}"
+    done
+
+    __print_prompt "Your choice [Accept]:"
+    read index
+
+    case $index in
+      1)
+        __dump_get_environment
+        ;;
+      2)
+        __dump_get_server_name
+        ;;
+      3)
+        __dump_get_multisite
+        ;;
+      4)
+        __dump_get_sub_site_name
+        ;;
+      5)
+        __dump_get_remote_site_url
+        ;;
+      6)
+        __dump_get_local_site_url
+        ;;
+      7)
+        __dump_get_local_docroot
+        ;;
+      *)
+        quit=yes
+        ;;
+    esac
+  done
+}
+
+__dump_save_params()
+{
+  [ ! -d $DUMP_PARAMS_CACHE_DIR ] && mkdir $PARAMS_CACHE_DIR
+  local cache_file=$(__get_dump_param_cache_file)
+  [ ! -f $cache_file ] && touch $cache_file
+
+  if [ -f $cache_file ]; then
+    echo "#!/bin/bash" > $cache_file
+    echo "DUMP_SITE_NAME=$DUMP_SITE_NAME" >> $cache_file
+    echo "DUMP_ENVIRONMENT=$DUMP_ENVIRONMENT" >> $cache_file
+    echo "DUMP_SERVER_NAME=$DUMP_SERVER_NAME" >> $cache_file
+    echo "DUMP_MULTISITE=$DUMP_MULTISITE" >> $cache_file
+    echo "DUMP_LOCAL_SITE_URL=$DUMP_LOCAL_SITE_URL" >> $cache_file
+    echo "DUMP_REMOTE_SITE_URL=$DUMP_REMOTE_SITE_URL" >> $cache_file
+    echo "DUMP_SUB_SITE_NAME=$DUMP_SUB_SITE_NAME" >> $cache_file
+    echo "DUMP_LOCAL_DOCROOT=$DUMP_LOCAL_DOCROOT" >> $cache_file
+  fi
+}
+
+__pre_site_dump()
+{
+  shift && shift
+
+  [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && DUMP_ENVIRONMENT=$1 || __print_info "Select environment to dump from" && DUMP_ENVIRONMENT=$(__get_environment)
+
+  __dump_reuse_existing_params
+
+  # If server name is empty, meaning that we don't have cached setting, start from scrach
+  [ -z "$DUMP_SERVER_NAME" ] && __preparare_hooked_command server-list "$DUMP_ENVIRONMENT"
+}
+
+__command_site_dump()
+{
+  # Get server name if it's not in the cache
+  if [ -z "$DUMP_SERVER_NAME" ]; then
+    local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
+    local servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"(staging|web|ded)-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+
+    [ -z "$servers" ] && __print_error "Can not get server list or there is no server. Abort!" && exit 1
+
+    for DUMP_SERVER_NAME in $servers; do
+      break
+    done
+  fi
+
+  DUMP_SITE_NAME=$SITE_NAME
+
+  [ -z "$DUMP_LOCAL_DOCROOT" ] && __dump_get_local_docroot
+  [ -z "$DUMP_MULTISITE" ] && __dump_get_multisite
+
+  # Now we should have everything we need
+  __dump_confirm_options
+
+  local confirm=""
+
+  echo -e -n "${txtRed}\e[5mWARNING${txtOff}: ${txtYellow}This operation will erase your local database and/or files. Do you want to continue?${txtOff} [y/n] "
+  read confirm
+
+  if [ "$confirm" == "y" -o "$confirm" == "Y" ]; then
+    __dump_do_site_dump
+  fi
+}
+
+__dump_issue_ssh_command()
+{
+  __issue_ssh_command $DUMP_ENVIRONMENT $DUMP_SERVER_NAME $1
+}
+
+__dump_database()
+{
+  local fqdn_server=${DUMP_SERVER_NAME}${SERVER_FQDN_SUFFIX}
+  if [ ! "$(__check_server_is_live $fqdn_server)" -eq 0 ]; then
+    __print_error "Can not access server at ${fqdn_server}. Please check that server name & suffix are correct"
+    return 1
+  fi
+
+  local db_file=db_backup_${DUMP_SITE_NAME}_${DUMP_ENVIRONMENT}_$(date +%Y_%m_%d_%H_%M).sql
+  local multisite_opt_remote=$(__dump_get_drush_multisite_opt $SITE_URL)
+  local multisite_opt_local=$(__dump_get_drush_multisite_opt)
+  local import_status=1
+
+  __print_info "Generate database snapshot on server $fqdn_server. This may take a while"
+
+  # Dump the remote database
+  __dump_issue_ssh_command "drush @${DUMP_SITE_NAME}.${DUMP_ENVIRONMENT} sql-dump $multisite_opt_remote --gzip > /tmp/$db_file.gz"
+
+  # Copy the database dump to local
+  __print_info "Copy remote database dump to local"
+  scp $DUMP_SITE_NAME@$fqdn_server:/tmp/$db_file.gz /tmp/
+
+  # Unzip the database dump file 
+  cd /tmp; gunzip $db_file.gz >/dev/null 2>&1; DUMP_DB_UPDATE_RET=$?
+  __print_command_status "Unzip database dump"
+
+  # Only proceed if the command succeeds. Otherwise, we may drop the local database totally.
+  if [ $DUMP_DB_UPDATE_RET -eq 0 ]; then
+
+    cd $DUMP_LOCAL_DOCROOT
+    local db_backup=local_db_backup_${DUMP_SITE_NAME}_$(date +%Y_%m_%d_%H_%M).sql
+
+
+    if [ -f /tmp/$db_file ]; then
+      __print_command_status "Make a backup of local database (/tmp/$db_backup)" $(drush $multisite_opt_local sql-dump > /tmp/$db_backup 2>&1)
+
+      __print_command_status "Drop all local database tables" $(__issue_local_drush_command "sql-drop --yes")
+
+      drush $multisite_opt_local sql-cli < /tmp/$db_file; import_status=$?
+      __print_command_status "Import remote database dump"
+
+      __print_command_status "Remove temporary database dump files on local" $(rm -f /tmp/$db_file.gz; rm -f /tmp/$db_file)
+
+      __print_command_status "Remove temporary database dump files on server" $(ssh $DUMP_SITE_NAME@$fqdn_server "cd /tmp; rm -f $db_file.gz")
+
+      if [ $import_status -eq 0 ]; then
+        __dump_post_database_dump
+        __dump_restart_memcache
+      fi
+    else
+      __print_error "Database dump file is corrupted. No action done"
+    fi
+
+  else
+    __print_error "Remote database dump is invalid. Please check your settings"
+  fi
+}
+
+__dump_restart_memcache()
+{
+  local os=$(__get_os)
+
+  if [ "$os" == "linux" ]; then
+    __print_command_status "Restart memcached" $(sudo service memcached restart >/dev/null 2>&1)
+  fi
+}
+
+__dump_post_database_dump()
+{
+  cd $DUMP_LOCAL_DOCROOT
+  __print_command_status "Enable Devel module" $(__dump_issue_local_drush_command "en devel -y")
+
+  __print_command_status "Enable Views UI module" $(__dump_issue_local_drush_command "en views_ui -y")
+
+  __print_command_status "Disable Securepages module" $(__dump_issue_local_drush_command "vset securepages_enable 0 -y")
+
+  __print_command_status "Disable Shield module" $(__dump_issue_local_drush_command "dis shield -y")
+
+  __print_command_status "Disable CSS caching" $(__dump_issue_local_drush_command "vset preprocess_css 0 -y")
+
+  __print_command_status "Disable JS caching" $(__dump_issue_local_drush_command "vset preprocess_js 0 -y")
+
+  __print_command_status "Disable page caching" $(__dump_issue_local_drush_command "vset cache 0 -y")
+
+  __print_command_status "Enable Stage File Proxy module" $(__dump_issue_local_drush_command "en stage_file_proxy -y")
+
+  __print_command_status "Reset temporary file path" $(__dump_issue_local_drush_command "vset file_temporary_path /tmp -y")
+
+  # Remove FirePHPCore downloaded by devel module
+  [ -d $DUMP_LOCAL_DOCROOT/FirePHPCore ] && rm -r $DUMP_LOCAL_DOCROOT/FirePHPCore
+}
+
+__dump_do_site_dump()
+{
+  __dump_put_site_offline
+  __dump_database
+}
+
+__command_site_dump_cache()
+{
+  echo "Not implemented yet."
+}
+
+######################################################## End site dump commands #######################################################
 
 __is_non_api_command()
 {

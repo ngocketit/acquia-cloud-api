@@ -54,5 +54,11 @@ memcache-flush;GET;Flush memcache server;http://server.prod.hosting.acquia.com;n
 memcache-stats;GET;Show memcache statistics;http://server.prod.hosting.acquia.com;non-api
 memcache-monitor;GET;Real-time monitor memcache statistics;http://server.prod.hosting.acquia.com;non-api
 
+[Development]
+site-dump;GET;Dump a site on Acquia Cloud to local;;non-api
+site-dump-cache;GET;Show the list of the cached site dump settings;non-api
+local-db-backup;GET;Backup local site database;;non-api
+local-db-restore;GET;Restore local database backup;;non-api
+
 [Others]
 cron-debug;GET;Debug cron to see what cron hooks are consuming most of the time;http://server.prod.hosting.acquia.com;non-api
