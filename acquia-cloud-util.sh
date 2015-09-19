@@ -5,8 +5,9 @@
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
 VERSION=0.6
-REPOS_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/acquia-cloud-util.sh
-COMMANDS_REPOS_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/acquia-cloud-commands
+REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
+REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
+COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
 CREDENTIALS_CACHE_DIR=$HOME/.acquia-cloud-util
 DEFAULT_EMAIL_ADDRESS=drupal@activeark.com
@@ -41,7 +42,7 @@ COMMAND_ARGS_NAMES=()
 COMMAND_OPTIONS=()
 
 # Site dump variables
-DUMP_PARAMS_CACHE_DIR=$HOME/${CREDENTIALS_CACHE_DIR}/.dump_params
+DUMP_PARAMS_CACHE_DIR=${CREDENTIALS_CACHE_DIR}/.dump_params
 DUMP_SITE_NAME=""
 DUMP_ENVIRONMENT=""
 DUMP_LOCAL_DOCROOT=""
@@ -95,12 +96,16 @@ __prompt_user_input()
 __print_command_status()
 {
   if [ $? -eq 0 ]; then
-    echo -e "${txtGreen}$1: ${txtOff}[ OK ]"
+    echo -e "${txtGreen}$1: ${txtOff}OK"
   else
-    echo -e "${txtGreen}$1: ${txtOff}[${txtRed} ERROR ${txtOff}]"
+    echo -e "${txtGreen}$1: ${txtOff}${txtRed}ERROR${txtOff}"
   fi
 }
 
+__get_os()
+{
+  echo $(uname) | tr '[:upper:]' '[:lower:]'
+}
 __do_self_update()
 {
   sudo mv "$1" $INSTALL_PATH && [ -f $INSTALL_PATH ] && sudo chmod a+x $INSTALL_PATH
@@ -771,6 +776,7 @@ __preparare_hooked_command()
   __set_chained_command_queue
 }
 
+# Implements hook_pre_COMMAND().
 __pre_database_copy()
 {
   local database_name=${COMMAND_ARGS_VALUES[2]}
@@ -778,6 +784,7 @@ __pre_database_copy()
   __preparare_hooked_command database-backup $target_env $database_name
 }
 
+# Implements hook_post_COMMAND().
 __post_database_copy()
 {
   local target_env=${COMMAND_ARGS_VALUES[4]}
@@ -903,6 +910,7 @@ __get_command_extra_options_database_backup_download()
   COMMAND_EXTRA_OPTIONS=" -o $saved_file_path"
 }
 
+# Implements hook_pre_COMMAND().
 __pre_varnish_purge()
 {
   __preparare_hooked_command server-list prod
@@ -994,6 +1002,7 @@ __do_memcache_flush()
   __issue_ssh_command $1 $2 "/bin/echo -e 'flush_all\nquit' | nc -q1 ${2}.prod.hosting.acquia.com 11211"
 }
 
+# Implements hook_pre_COMMAND().
 __pre_memcache_flush()
 {
   MEMCACHE_FLUSH_EVN=""
@@ -1193,7 +1202,7 @@ __dump_issue_local_drush_command()
 __dump_put_site_offline()
 {
   cd $DUMP_LOCAL_DOCROOT
-  __print_command_status "Put site into maintenance mode" $(__issue_local_drush_command "vset maintenance_mode 1")
+  __print_command_status "Put site into maintenance mode" $(__dump_issue_local_drush_command "vset maintenance_mode 1")
 }
 
 __dump_confirm_options()
@@ -1226,7 +1235,7 @@ __dump_confirm_options()
       echo -e "${i}) ${txtYellow}${labels[$i]}${txtOff}: ${txtWhite}${value}${txtOff}"
     done
 
-    __print_prompt "Your choice [Accept]:"
+    __print_prompt "Enter your choice number or press Enter to confirm the options:"
     read index
 
     case $index in
@@ -1260,8 +1269,8 @@ __dump_confirm_options()
 
 __dump_save_params()
 {
-  [ ! -d $DUMP_PARAMS_CACHE_DIR ] && mkdir $PARAMS_CACHE_DIR
-  local cache_file=$(__get_dump_param_cache_file)
+  [ ! -d $DUMP_PARAMS_CACHE_DIR ] && mkdir $DUMP_PARAMS_CACHE_DIR
+  local cache_file=$(__dump_get_param_cache_file)
   [ ! -f $cache_file ] && touch $cache_file
 
   if [ -f $cache_file ]; then
@@ -1277,11 +1286,12 @@ __dump_save_params()
   fi
 }
 
+# Implements hook_pre_COMMAND().
 __pre_site_dump()
 {
-  shift && shift
-
-  [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && DUMP_ENVIRONMENT=$1 || __print_info "Select environment to dump from" && DUMP_ENVIRONMENT=$(__get_environment)
+  # NOTE: Don't have shift && shift here since this has been done already
+  [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && DUMP_ENVIRONMENT=$1
+  [ -z "$DUMP_ENVIRONMENT" ] && __print_info "Select environment to dump from" && DUMP_ENVIRONMENT=$(__get_environment)
 
   __dump_reuse_existing_params
 
@@ -1323,7 +1333,7 @@ __command_site_dump()
 
 __dump_issue_ssh_command()
 {
-  __issue_ssh_command $DUMP_ENVIRONMENT $DUMP_SERVER_NAME $1
+  __issue_ssh_command $DUMP_ENVIRONMENT $DUMP_SERVER_NAME "$1"
 }
 
 __dump_database()
@@ -1362,7 +1372,7 @@ __dump_database()
     if [ -f /tmp/$db_file ]; then
       __print_command_status "Make a backup of local database (/tmp/$db_backup)" $(drush $multisite_opt_local sql-dump > /tmp/$db_backup 2>&1)
 
-      __print_command_status "Drop all local database tables" $(__issue_local_drush_command "sql-drop --yes")
+      __print_command_status "Drop all local database tables" $(__dump_issue_local_drush_command "sql-drop --yes")
 
       drush $multisite_opt_local sql-cli < /tmp/$db_file; import_status=$?
       __print_command_status "Import remote database dump"
@@ -1374,6 +1384,8 @@ __dump_database()
       if [ $import_status -eq 0 ]; then
         __dump_post_database_dump
         __dump_restart_memcache
+        __dump_save_params
+        __print_info "$(__to_uppercase "Have a cup of coffee, you're all done!")"
       fi
     else
       __print_error "Database dump file is corrupted. No action done"
@@ -1383,6 +1395,7 @@ __dump_database()
     __print_error "Remote database dump is invalid. Please check your settings"
   fi
 }
+
 
 __dump_restart_memcache()
 {
