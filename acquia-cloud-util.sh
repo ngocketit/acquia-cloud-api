@@ -43,6 +43,8 @@ COMMAND_OPTIONS=()
 
 # Site dump variables
 DUMP_PARAMS_CACHE_DIR=${CREDENTIALS_CACHE_DIR}/.dump_params
+DUMP_LOCAL_DB_DIR=${CREDENTIALS_CACHE_DIR}/.dump_local_db
+
 DUMP_SITE_NAME=""
 DUMP_ENVIRONMENT=""
 DUMP_LOCAL_DOCROOT=""
@@ -52,6 +54,7 @@ DUMP_REMOTE_SITE_URL=""
 DUMP_SUB_SITE_NAME=""
 DUMP_SERVER_NAME=""
 
+DUMP_CHOSEN_CACHE_FILE=""
 DUMP_DB_UPDATE_RET=1
 
 # Color codes
@@ -78,7 +81,9 @@ __print_info()
 
 __print_prompt()
 {
-  echo -e -n "${txtGreen}$1${txtOff} $2"
+  local hint=" "
+  [ "$#" -ge 2 ] && hint=" $2 "
+  echo -e -n "${txtGreen}$1${txtOff}${hint}"
 }
 
 __print_warning()
@@ -1124,13 +1129,13 @@ __dump_reuse_existing_params()
 
 __dump_get_local_docroot()
 {
-  __print_prompt "Local site docroot path: "
+  __print_prompt "Local site docroot path:"
   read DUMP_LOCAL_DOCROOT
 }
 
 __dump_get_server_name()
 {
-  __print_prompt "Name of the server to dump from (for example, staging-4605): "
+  __print_prompt "Name of the server to dump from (for example, staging-4605):"
   read DUMP_SERVER_NAME
 }
 
@@ -1143,20 +1148,20 @@ __dump_get_environment()
 
 __dump_get_local_site_url()
 {
-  __print_prompt "Local site URL: "
+  __print_prompt "Local site URL:"
   read DUMP_LOCAL_SITE_URL
 }
 
 
 __dump_get_remote_site_url()
 {
-  __print_prompt "Remote site URL: "
+  __print_prompt "Remote site URL:"
   read DUMP_REMOTE_SITE_URL
 }
 
 __dump_get_sub_site_name()
 {
-  __print_prompt "Name of the subsite in the multisite setup: "
+  __print_prompt "Name of the subsite in the multisite setup:"
   read DUMP_SUB_SITE_NAME
 }
 
@@ -1336,6 +1341,13 @@ __dump_issue_ssh_command()
   __issue_ssh_command $DUMP_ENVIRONMENT $DUMP_SERVER_NAME "$1"
 }
 
+__dump_get_local_db_backup_file()
+{
+  local base_name=${SITE_NAME}
+  [ "$DUMP_MULTISITE" = "y" ] && base_name=${base_name}_${DUMP_SUB_SITE_NAME}
+  echo db_backup_${base_name}_$(date +%Y_%m_%d_%H_%M).sql.gz
+}
+
 __dump_database()
 {
   local fqdn_server=${DUMP_SERVER_NAME}${SERVER_FQDN_SUFFIX}
@@ -1370,7 +1382,8 @@ __dump_database()
 
 
     if [ -f /tmp/$db_file ]; then
-      __print_command_status "Make a backup of local database (/tmp/$db_backup)" $(drush $multisite_opt_local sql-dump > /tmp/$db_backup 2>&1)
+      local backup_desc="${DUMP_SITE_NAME}:${DUMP_ENVIRONMENT}: Automatic backup"
+      __print_command_status "Make a backup of local database" $(__dump_do_backup_local_db "$backup_desc")
 
       __print_command_status "Drop all local database tables" $(__dump_issue_local_drush_command "sql-drop --yes")
 
@@ -1437,9 +1450,155 @@ __dump_do_site_dump()
   __dump_database
 }
 
+__dump_list_cache_files()
+{
+  local files i=1 j choice
+  # Reset it
+  DUMP_CHOSEN_CACHE_FILE=""
+
+  for file in $(ls $DUMP_PARAMS_CACHE_DIR); do
+    files[$i]="$file"
+    let "i+=1"
+  done
+
+  for(( j=1; j<=${#files[@]}; j++ )); do
+    echo -e "${j}) ${txtYellow}${files[$j]}${txtOff}"
+  done
+
+  __print_prompt "Enter your choice number:"
+  read choice
+
+  if [ -f $DUMP_PARAMS_CACHE_DIR/${files[$choice]} ]; then
+    DUMP_CHOSEN_CACHE_FILE=$DUMP_PARAMS_CACHE_DIR/${files[$choice]}
+  else
+    __print_error "Invalid choice. Abort!"
+  fi
+}
+
 __command_site_dump_cache()
 {
-  echo "Not implemented yet."
+  local quit=""
+
+  while [ -z "$quit" ]; do
+    __dump_list_cache_files
+
+    if [ ! -z "$DUMP_CHOSEN_CACHE_FILE" ]; then
+      local choice options=("Dump site using cached settings" "Remove cached settings file" "Back to the list")
+
+      select choice in "${options[@]}"; do
+        case $REPLY in
+          1)
+            source $DUMP_CHOSEN_CACHE_FILE
+            __command_site_dump
+            quit=true
+            break
+            ;;
+          2)
+            rm -f "$DUMP_CHOSEN_CACHE_FILE" && __print_info "Cached settings file removed"
+            break
+            ;;
+          3)
+            break
+            ;;
+          *)
+            break
+            ;;
+        esac
+      done
+    fi
+  done
+}
+
+__dump_do_backup_local_db()
+{
+  cd $DUMP_LOCAL_DOCROOT
+  [ ! -d "$DUMP_LOCAL_DB_DIR/$SITE_NAME" ] && mkdir -p $DUMP_LOCAL_DB_DIR/$SITE_NAME
+
+  local desc=$1 multisite_opt_local=$(__dump_get_drush_multisite_opt)
+  local dump_file=$(__dump_get_local_db_backup_file)
+  local ret=$(drush $multisite_opt_local sql-dump --gzip --result-file=$DUMP_LOCAL_DB_DIR/$SITE_NAME/$dump_file > /dev/null 2>&1)
+  [ "$?" = "0" ] && __dump_write_db_backup_meta "$desc" "$dump_file"
+  echo $?
+}
+
+__dump_write_db_backup_meta()
+{
+  local desc="$1" dump_meta_file_path=$DUMP_LOCAL_DB_DIR/$SITE_NAME/${2//.sql.gz/}.meta
+  [ ! -d "$DUMP_LOCAL_DB_DIR/$SITE_NAME" ] && mkdir -p $DUMP_LOCAL_DB_DIR/$SITE_NAME
+  [ ! -f "$dump_file" ] && touch $dump_meta_file_path
+
+  if [ -f $dump_file_path ]; then
+    echo "#!/bin/bash" >> $dump_meta_file_path
+    echo "DUMP_LOCAL_DOCROOT=$DUMP_LOCAL_DOCROOT" >> $dump_meta_file_path
+    echo "DUMP_MULTISITE=$DUMP_MULTISITE" >> $dump_meta_file_path
+    echo "DUMP_LOCAL_SITE_URL=$DUMP_LOCAL_SITE_URL" >> $dump_meta_file_path
+    echo "DUMP_SUB_SITE_NAME=$DUMP_SUB_SITE_NAME" >> $dump_meta_file_path
+    echo "DUMP_LOCAL_DB_FILE_PATH=$DUMP_LOCAL_DB_DIR/$SITE_NAME/$2" >> $dump_meta_file_path
+    echo "DUMP_DESCRIPTION=\"$desc\"" >> $dump_meta_file_path
+    echo 0
+  fi
+
+  echo 1
+}
+
+__command_local_db_backup()
+{
+  # Get the settings from the cache if there is already a backup
+  if [ -d $DUMP_LOCAL_DB_DIR/$SITE_NAME ]; then
+    local afile=""
+    cd $DUMP_LOCAL_DB_DIR/$SITE_NAME
+
+    for file in $(ls *.meta); do
+      afile=$file
+      break
+    done
+
+    [ ! -z "$afile" ] && source $DUMP_LOCAL_DB_DIR/$SITE_NAME/$afile
+  fi
+
+  [ -z "$DUMP_LOCAL_DOCROOT" ] && __dump_get_local_docroot
+  [ -z "$DUMP_MULTISITE" ] && __dump_get_multisite
+  [ "$DUMP_MULTISITE" = "y" ] && [ -z "$DUMP_LOCAL_SITE_URL" ] && __dump_get_local_site_url
+  [ "$DUMP_MULTISITE" = "y" ] && [ -z "$DUMP_SUB_SITE_NAME" ] && __dump_get_sub_site_name
+
+  local desc
+  __print_prompt "Enter a short description about the backup:" && read desc
+  __print_command_status "Doing local database backup" $(__dump_do_backup_local_db "$desc")
+}
+
+__command_local_db_restore()
+{
+  local files i=1 j choice
+
+  [ ! -d "$DUMP_LOCAL_DB_DIR/$SITE_NAME" ] || [ -z "$(ls $DUMP_LOCAL_DB_DIR/$SITE_NAME/*.meta)" ] && __print_warning "The site has no database backup. Abort!" && exit 1
+
+  cd $DUMP_LOCAL_DB_DIR/$SITE_NAME
+
+  for file in $(ls *.meta); do
+    files[$i]="${file}"
+    let "i+=1"
+  done
+
+  echo
+  for(( j=1; j<=${#files[@]}; j++ )); do
+    source $DUMP_LOCAL_DB_DIR/$SITE_NAME/${files[$j]}
+    echo -e "${j}) ${txtYellow}${files[$j]//.meta/}${txtOff}"
+    echo "$DUMP_DESCRIPTION"
+    echo
+  done
+
+  __print_prompt "Enter your choice number:"
+  read choice
+
+  if [ -f $DUMP_LOCAL_DB_DIR/$SITE_NAME/${files[$choice]} ]; then
+    source $DUMP_LOCAL_DB_DIR/$SITE_NAME/${files[$choice]}
+    local confirm
+    __print_prompt "Do you want to make a backup before restoring?" "[y/n]" && read confirm
+    [ "$confirm" = "y" ] && __command_local_db_backup
+    __print_prompt "WARNING: Do you really want to do this?" "[y/n]" && read confirm
+  else
+    __print_error "Invalid choice. Abort!"
+  fi
 }
 
 ######################################################## End site dump commands #######################################################

@@ -56,7 +56,7 @@ memcache-monitor;GET;Real-time monitor memcache statistics;http://server.prod.ho
 
 [Development]
 site-dump;GET;Dump a site on Acquia Cloud to local;;non-api
-site-dump-cache;GET;Show the list of the cached site dump settings;non-api
+site-dump-cache;GET;Show the list of the cached site dump settings;;non-api
 local-db-backup;GET;Backup local site database;;non-api
 local-db-restore;GET;Restore local database backup;;non-api
 
