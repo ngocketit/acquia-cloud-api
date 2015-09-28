@@ -56,6 +56,7 @@ DUMP_SERVER_NAME=""
 
 DUMP_CHOSEN_CACHE_FILE=""
 DUMP_DB_UPDATE_RET=1
+DUMP_DB_BACKUP_KEEP_COUNT=5 # Maximum number of backup to keep
 
 # Color codes
 txtOff='\e[0m'          # Text Reset
@@ -1345,7 +1346,7 @@ __dump_get_local_db_backup_file()
 {
   local base_name=${SITE_NAME}
   [ "$DUMP_MULTISITE" = "y" ] && base_name=${base_name}_${DUMP_SUB_SITE_NAME}
-  echo db_backup_${base_name}_$(date +%Y_%m_%d_%H_%M).sql.gz
+  echo db_backup_${base_name}_$(date +%Y_%m_%d_%H_%M).sql
 }
 
 __dump_database()
@@ -1523,7 +1524,7 @@ __dump_do_backup_local_db()
 
 __dump_write_db_backup_meta()
 {
-  local desc="$1" dump_meta_file_path=$DUMP_LOCAL_DB_DIR/$SITE_NAME/${2//.sql.gz/}.meta
+  local desc="$1" dump_meta_file_path=$DUMP_LOCAL_DB_DIR/$SITE_NAME/${2//.sql/}.meta
   [ ! -d "$DUMP_LOCAL_DB_DIR/$SITE_NAME" ] && mkdir -p $DUMP_LOCAL_DB_DIR/$SITE_NAME
   [ ! -f "$dump_file" ] && touch $dump_meta_file_path
 
@@ -1564,6 +1565,34 @@ __command_local_db_backup()
   local desc
   __print_prompt "Enter a short description about the backup:" && read desc
   __print_command_status "Doing local database backup" $(__dump_do_backup_local_db "$desc")
+  __dump_delete_old_backup
+}
+
+__dump_do_db_restore()
+{
+  cd $DUMP_LOCAL_DOCROOT
+  local file_path=$1 multisite_opt_local=$(__dump_get_drush_multisite_opt)
+
+  __print_command_status "Drop all local database tables" $(__dump_issue_local_drush_command "sql-drop --yes")
+  gunzip -c $file_path | drush $multisite_opt_local sql-cli --database=default
+  __print_command_status "Import local database dump"
+  __dump_restart_memcache
+}
+
+__dump_delete_old_backup()
+{
+  if [ -d "$DUMP_LOCAL_DB_DIR/$SITE_NAME" ]; then
+    cd $DUMP_LOCAL_DB_DIR/$SITE_NAME
+    local i=0
+
+    for file in $(ls -t *.meta); do
+      let "i+=1"
+      if [ $i -gt $DUMP_DB_BACKUP_KEEP_COUNT ]; then
+        rm $file > /dev/null 2>&1
+        rm ${file//.meta/}.sql.gz > /dev/null 2>&1
+      fi
+    done
+  fi
 }
 
 __command_local_db_restore()
@@ -1574,7 +1603,7 @@ __command_local_db_restore()
 
   cd $DUMP_LOCAL_DB_DIR/$SITE_NAME
 
-  for file in $(ls *.meta); do
+  for file in $(ls -t *.meta); do
     files[$i]="${file}"
     let "i+=1"
   done
@@ -1595,7 +1624,8 @@ __command_local_db_restore()
     local confirm
     __print_prompt "Do you want to make a backup before restoring?" "[y/n]" && read confirm
     [ "$confirm" = "y" ] && __command_local_db_backup
-    __print_prompt "WARNING: Do you really want to do this?" "[y/n]" && read confirm
+    __print_prompt "WARNING: Do you really want to do this restore which will erase your current database?" "[y/n]" && read confirm
+    [ "$confirm" = "y" ] && __dump_do_db_restore $DUMP_LOCAL_DB_DIR/$SITE_NAME/${files[$choice]//.meta/}.sql.gz
   else
     __print_error "Invalid choice. Abort!"
   fi
