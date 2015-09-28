@@ -1383,7 +1383,7 @@ __dump_database()
 
 
     if [ -f /tmp/$db_file ]; then
-      local backup_desc="${DUMP_SITE_NAME}:${DUMP_ENVIRONMENT}: Automatic backup"
+      local backup_desc="${DUMP_SITE_NAME}:${DUMP_ENVIRONMENT}: Site dump automatic backup"
       __print_command_status "Make a backup of local database" $(__dump_do_backup_local_db "$backup_desc")
 
       __print_command_status "Drop all local database tables" $(__dump_issue_local_drush_command "sql-drop --yes")
