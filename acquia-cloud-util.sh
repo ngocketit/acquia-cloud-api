@@ -21,6 +21,7 @@ SERVER_FQDN_SUFFIX=.prod.hosting.acquia.com
 CHOSEN_CACHE_FILE=""
 
 SITE_NAME=""
+SITE_ENV=""
 EMAIL_ADDRESS=""
 PRIVATE_KEY=""
 COMMAND=""
@@ -30,7 +31,7 @@ COMMAND_EXTRA_OPTIONS=""
 CHAINED_COMMAND_QUEUE=""
 COMMAND_FLAGS=""
 
-MEMCACHE_FLUSH_EVN=""
+DB_NAME=""
 
 COMMAND_NAMES=()
 COMMAND_METHODS=()
@@ -410,8 +411,7 @@ __add_credentials()
 
 __get_environment()
 {
-  local choice
-  select choice in "${ALL_ENVS[@]}"; do
+  select SITE_ENV in "${ALL_ENVS[@]}"; do
     case $REPLY in
       1|2|3)
         break
@@ -421,8 +421,8 @@ __get_environment()
     esac
   done
 
-  [ "$choice" == "stg" ] && choice="test"
-  echo $choice
+  [ "$SITE_ENV" == "stg" ] && SITE_ENV="test"
+  echo $SITE_ENV
 }
 
 __is_valid_environment()
@@ -906,13 +906,17 @@ __get_command_extra_options()
   local cmd_name_processed=${cmd_name//\-/_}
   local func_name="__get_command_extra_options_${cmd_name_processed}"
 
-  type $func_name >/dev/null 2>&1
+  type $func_name "$@" >/dev/null 2>&1
   [ $? -eq 0 ] && $func_name
 }
 
 __get_command_extra_options_database_backup_download()
 {
-  local saved_file_path=$(__prompt_user_input "Save database backup to: ")
+  local file_name=${SITE_NAME}_${SITE_ENV}
+  [ ! -z "$DB_NAME" ] && file_name=${file_name}_${DB_NAME}
+  file_name=${file_name}.sql.gz
+  local saved_file_path=$(__prompt_user_input "Save database backup to [/tmp/$file_name]: ")
+  [ -z "$saved_file_path" ] && saved_file_path=/tmp/$file_name
   COMMAND_EXTRA_OPTIONS=" -o $saved_file_path"
 }
 
@@ -1011,29 +1015,20 @@ __do_memcache_flush()
 # Implements hook_pre_COMMAND().
 __pre_memcache_flush()
 {
-  MEMCACHE_FLUSH_EVN=""
-  [ $# -ge 1 ] && MEMCACHE_FLUSH_EVN=$1
-  ([ -z "$MEMCACHE_FLUSH_EVN" ] || [ -z "$(__is_valid_environment $MEMCACHE_FLUSH_EVN)" ]) && __print_info "Select the environment on which to flush the memcache" && MEMCACHE_FLUSH_EVN=$(__get_environment)
-  __preparare_hooked_command server-list $MEMCACHE_FLUSH_EVN
+  [ $# -ge 1 ] && SITE_EVN=$1
+  ([ -z "$SITE_EVN" ] || [ -z "$(__is_valid_environment $SITE_ENV)" ]) && __print_info "Select the environment on which to flush the memcache" && __get_environment
+  __preparare_hooked_command server-list $SITE_ENV
 }
 
 __command_memcache_flush()
 {
   local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
-  local staging_servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"staging-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
-  local web_servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"web-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+  local servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"(web|staging|ded)-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
 
-  if [ ! -z "$staging_servers" ]; then
-    for server in $staging_servers; do
+  if [ ! -z "$servers" ]; then
+    for server in $servers; do
       __print_info "Flushing memcache for server: $server.prod.hosting.acquia.com"
-      __do_memcache_flush $MEMCACHE_FLUSH_EVN $server
-    done
-  fi
-
-  if [ ! -z "$web_servers" ]; then
-    for server in $web_servers; do
-      __print_info "Flushing memcache for server: $server.prod.hosting.acquia.com"
-      __do_memcache_flush $MEMCACHE_FLUSH_EVN $server
+      __do_memcache_flush $SITE_ENV $server
     done
   fi
 }
@@ -1633,6 +1628,41 @@ __command_local_db_restore()
 
 ######################################################## End site dump commands #######################################################
 
+# Implements hook_pre_COMMAND().
+__pre_download_latest_db_backup()
+{
+  # NOTE: Don't have shift && shift here since this has been done already
+  [ $# -ge 1 ] && [ ! -z "$(__is_valid_environment $1)" ] && SITE_ENV=$1
+  [ -z "$SITE_ENV" ] && __print_info "Select environment to dump from" && SITE_ENV=$(__get_environment)
+
+  [ $# -ge 2 ] && DB_NAME=$2 
+  [ -z "$DB_NAME" ] && __print_prompt "Name of the database intance:" && read DB_NAME
+
+  __preparare_hooked_command database-backup-list $SITE_ENV $DB_NAME
+}
+
+__command_download_latest_db_backup()
+{
+  local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
+  local paths=$(__beautify_json_output "$last_cmd_output" | grep -E "\"path\": \".+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+  local ids=$(__beautify_json_output "$last_cmd_output" | grep -E "\"id\": \"[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+
+  local j=0 latest_index=0 latest_id=0 latest_path="" path_arr=($paths) id_arr=($ids)
+
+  while [ $j -lt ${#id_arr[@]} ]; do
+    [ ${id_arr[$j]} -ge $latest_id ] && latest_index=$j && latest_id=${id_arr[$j]}
+    let "j++"
+  done
+
+  DB_BACKUP_DOWNLOAD_ID=${id_arr[$latest_index]}
+  DB_BACKUP_DOWNLOAD_PATH=${path_arr[$latest_index]}
+}
+
+__post_download_latest_db_backup()
+{
+  __preparare_hooked_command database-backup-download $SITE_ENV $DB_NAME $DB_BACKUP_DOWNLOAD_ID
+}
+
 __is_non_api_command()
 {
   echo $(__get_command_option "non-api")
@@ -1654,7 +1684,7 @@ __execute_command()
   __ensure_command_params $PREPARED_COMMAND_PATH
 
   __get_command_body
-  __get_command_extra_options
+  __get_command_extra_options "$@"
   __get_command_flags
 
   local num_attempts=0 cmd_output="" cmd_state="" cmd_confirm="y"
