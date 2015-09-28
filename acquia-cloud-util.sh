@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.6
+VERSION=0.7
 REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
