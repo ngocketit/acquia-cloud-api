@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.7
+VERSION=0.8
 REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
@@ -1394,7 +1394,7 @@ __dump_database()
         __dump_post_database_dump
         __dump_restart_memcache
         __dump_save_params
-        __print_info "$(__to_uppercase "Have a cup of coffee, you're all done!")"
+        __print_warning "$(__to_uppercase "Have a cup of coffee, you're all done!")"
       fi
     else
       __print_error "Database dump file is corrupted. No action done"
@@ -1661,6 +1661,47 @@ __command_download_latest_db_backup()
 __post_download_latest_db_backup()
 {
   __preparare_hooked_command database-backup-download $SITE_ENV $DB_NAME $DB_BACKUP_DOWNLOAD_ID
+}
+
+__command_logstream()
+{
+  which logstream > /dev/null 2>&1
+
+  if [ "$?" = "1" ]; then
+    which gem > /dev/null 2>&1
+    if [ $? = 1 ]; then
+      __print_error "You need Ruby gem on your machine."
+      [ "$(__get_os)" = "linux" ] && __print_info "Installing Ruby gems..." && sudo apt-get install rubygems
+      which gem > /dev/null 2>&1 && [ $? = 1 ] && __print_error "Failed to install Ruby gems. Please do that yourself and retry later" && exit 1
+    fi
+    which gem > /dev/null 2>&1 && [ $? = 0 ] && __print_info "Installing logstream..." && gem install logstream && [ $? = 1 ] && __print_error "Failed to install logstream. Please run: 'gem install logstream' yourself" && exit 1
+  fi
+
+  # Now we have logstream installed
+  shift && shift
+  [ $# -ge 1 ] && [ ! -z $(__is_valid_environment $1) ] && SITE_ENV=$1 || __get_environment
+
+  local request_type=""
+  [ $# -ge 2 ] && request_type="${2//,/ }"
+
+  if [ -z "$request_type" ]; then
+    local all_types=(apache-request apache-error php-error drupal-request drupal-watchdog varnish-request)
+    __print_info "Select log type"
+
+    select request_type in "${all_types[@]}"; do
+      case $REPLY in
+        1|2|3|4|5|6)
+          break
+          ;;
+        *)
+          __print_error "Wrong choice!"
+          ;;
+      esac
+    done
+  fi
+
+  __print_info "Streaming..."
+  logstream tail $SITE_ENV:$SITE_NAME $SITE_ENV --color --types="$request_type"
 }
 
 __is_non_api_command()

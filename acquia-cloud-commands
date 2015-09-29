@@ -63,3 +63,4 @@ download-latest-db-backup;GET;Download the latest database instance backup;;non-
 
 [Others]
 cron-debug;GET;Debug cron to see what cron hooks are consuming most of the time;http://server.prod.hosting.acquia.com;non-api
+logstream;GET;Show realtime server log stream;;non-api
