@@ -566,7 +566,7 @@ __get_private_key()
 
 __get_site_realm()
 {
-  [ -z "$SITE_REALM" ] && SITE_REALM=$(drush @${SITE_NAME}.prod ac-site-list | grep "$SITE_NAME")
+  [ -z "$SITE_REALM" ] && SITE_REALM=$(drush @${SITE_NAME}.prod ac-site-list --email=$EMAIL_ADDRESS --key=$PRIVATE_KEY | grep "$SITE_NAME")
   echo $SITE_REALM
 }
 
@@ -765,7 +765,6 @@ __save_credentials()
   echo "EMAIL_ADDRESS=$EMAIL_ADDRESS" >> $cred_file
   echo "PRIVATE_KEY=$PRIVATE_KEY" >> $cred_file
   echo "SITE_REALM=$SITE_REALM" >> $cred_file
-  echo "realm $SITE_REALM" && exit
 }
 
 __print_command_confirmation()
