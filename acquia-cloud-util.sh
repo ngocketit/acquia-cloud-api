@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.10
+VERSION=0.11
 REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
@@ -567,6 +567,7 @@ __get_private_key()
 __get_site_realm()
 {
   [ -z "$SITE_REALM" ] && SITE_REALM=$(drush @${SITE_NAME}.prod ac-site-list --email=$EMAIL_ADDRESS --key=$PRIVATE_KEY | grep "$SITE_NAME")
+
   echo $SITE_REALM
 }
 
@@ -1005,7 +1006,7 @@ __issue_ssh_command()
 {
   local env=$1 server=$2 cmd=$3
   server=${server//$SERVER_FQDN_SUFFIX/}
-  ssh ${SITE_NAME}.${env}@${server}.prod.hosting.acquia.com "$cmd"
+  ssh ${SITE_NAME}.${env}@${server}${SERVER_FQDN_SUFFIX} "$cmd"
 }
 
 __check_server_is_live()
@@ -1027,7 +1028,7 @@ __get_memcache_servers()
 
 __do_memcache_flush()
 {
-  __issue_ssh_command $1 $2 "/bin/echo -e 'flush_all\nquit' | nc -q1 ${2}.prod.hosting.acquia.com 11211"
+  __issue_ssh_command $1 $2 "/bin/echo -e 'flush_all\nquit' | nc -q1 ${2}${SERVER_FQDN_SUFFIX} 11211"
 }
 
 # Implements hook_pre_COMMAND().
@@ -1041,11 +1042,11 @@ __pre_memcache_flush()
 __command_memcache_flush()
 {
   local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
-  local servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"(web|staging|ded)-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+  local servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"(web|staging|ded|srv)-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
 
   if [ ! -z "$servers" ]; then
     for server in $servers; do
-      __print_info "Flushing memcache for server: $server.prod.hosting.acquia.com"
+      __print_info "Flushing memcache for server: ${server}${SERVER_FQDN_SUFFIX}"
       __do_memcache_flush $SITE_ENV $server
     done
   fi
@@ -1738,6 +1739,13 @@ __execute_non_api_command()
 
 __execute_command()
 {
+  # This needs to be run even for non-api commands since the server FQDN is dependant on it
+  SITE_REALM=$(__get_site_realm)
+
+  # Change server fqdn for the devcloud (Developer subscription)
+  local devcloud=$(echo $SITE_REALM | grep devcloud)
+  [ ! -z "$devcloud" ] && SERVER_FQDN_SUFFIX=.devcloud.hosting.acquia.com
+
   __ensure_command_params $PREPARED_COMMAND_PATH
 
   __get_command_body
