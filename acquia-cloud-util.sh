@@ -9,10 +9,11 @@ REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/mast
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
 INSTALL_PATH=/usr/local/bin/acquia-cloud-util
-CREDENTIALS_CACHE_DIR=$HOME/.acquia-cloud-util
+BASE_SETTING_DIR=$HOME/.acquia-cloud-util
+CREDENTIALS_CACHE_DIR=${BASE_SETTING_DIR}/.cred
 DEFAULT_EMAIL_ADDRESS=drupal@activeark.com
 API_ENDPOINT=https://cloudapi.acquia.com/v1
-COMMAND_FILE_PATH=${CREDENTIALS_CACHE_DIR}/.acquia-cloud-commands
+COMMAND_FILE_PATH=${BASE_SETTING_DIR}/.acquia-cloud-commands
 DEFAULT_SITE_NAME=default
 COMMAND_RESULT_OUTPUT=/tmp/last_cmd
 ALL_ENVS=(dev test prod)
@@ -21,6 +22,7 @@ SERVER_FQDN_SUFFIX=.prod.hosting.acquia.com
 CHOSEN_CACHE_FILE=""
 
 SITE_NAME=""
+SITE_REALM=""
 SITE_ENV=""
 EMAIL_ADDRESS=""
 PRIVATE_KEY=""
@@ -285,6 +287,8 @@ __print_cached_credentials()
   else
     __print_warning "There is no items in the cache"
   fi
+
+  exit 0
 }
 
 __print_cached_credentials_ops()
@@ -358,6 +362,7 @@ __update_credentials()
   echo "#!/bin/bash" > $CHOSEN_CACHE_FILE
   echo "EMAIL_ADDRESS=$email" >> $CHOSEN_CACHE_FILE
   echo "PRIVATE_KEY=$key" >> $CHOSEN_CACHE_FILE
+  echo "SITE_REALM=$SITE_REALM" >> $CHOSEN_CACHE_FILE
   __print_info "Credentials updated!"
 }
 
@@ -531,7 +536,7 @@ __is_integer()
 
 __print_prompt_email()
 {
-  __print_prompt "Email address [$DEFAULT_EMAIL_ADDRESS]:"
+  __print_prompt "Email address:"
 }
 
 __get_sitename()
@@ -551,7 +556,8 @@ __get_private_key()
 
 __get_site_realm()
 {
-  echo "prod:$SITE_NAME"
+  [ -z "$SITE_REALM" ] && SITE_REALM=$(drush @${SITE_NAME}.prod ac-site-list | grep "$SITE_NAME")
+  echo $SITE_REALM
 }
 
 __init_command_path()
