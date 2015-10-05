@@ -72,6 +72,20 @@ txtPurple='\e[0;35m'    # Purple
 txtCyan='\e[0;36m'      # Cyan
 txtWhite='\e[0;37m'     # White
 
+OS=$(echo $(uname) | tr '[:upper:]' '[:lower:]')
+
+# Don't use coloring on MAC
+if [ "$OS" != "linux" ]; then
+  txtOff=""
+  txtBlack=""
+  txtRed=""
+  txtGreen=""
+  txtYellow=""
+  txtBlue=""
+  txtPurple=""
+  txtCyan=""
+  txtWhite=""
+fi
 
 __print_error()
 {
@@ -111,10 +125,6 @@ __print_command_status()
   fi
 }
 
-__get_os()
-{
-  echo $(uname) | tr '[:upper:]' '[:lower:]'
-}
 __do_self_update()
 {
   sudo mv "$1" $INSTALL_PATH && [ -f $INSTALL_PATH ] && sudo chmod a+x $INSTALL_PATH
@@ -209,7 +219,7 @@ COMMAND USAGE
 
 DESCRIPTION:
 
-- site:                       Unique name of the site as on Acquia Cloud. For example, newnokia, nixucom etc
+- site:                       Unique name of the site as on Acquia Cloud. For example, site_1, site_2 etc
 
 - command name:               Name of the command to be executed. For example, database-copy, task-info etc
 
@@ -218,7 +228,7 @@ DESCRIPTION:
                               Any missing arguments will be prompted to enter so you don't need to provide the full
                               list or arguments. 
                               
-                              For example: $0 newnokia database-copy dev
+                              For example: $0 site_1 database-copy dev
                               The source and target environments will be asked to be entered.
 
 EXAMPLES:
@@ -226,18 +236,18 @@ EXAMPLES:
 - $0 --add <site> <email.address> <key>
                               Add the credentials for site <site>
 
-- $0 --add default drupal@activeark.com <key>
+- $0 --add default <acquia account email> <acquia account key>
                               Add the credentials for default account
 
-- $0 newnokia                 
+- $0 site_1
                               Only site name is provided, you'll be presenting with a list of commands that you can
                               select along with prompts for required arguments.
 
-- $0 newnokia task-info       
+- $0 site_2 task-info
                               Get information about a task. Task ID will be prompted for enter.                                
 
-- $0 newnokia database-copy newnokia prod dev
-                              Copy newnokia database from PRODUCTION to DEVELOPMENT
+- $0 site_1 database-copy site_1_db prod dev
+                              Copy site_1 database from PRODUCTION to DEVELOPMENT
 
 EOF
 }
@@ -587,7 +597,8 @@ __ensure_command_params()
 
     case "$param" in
       :site)
-        __replace_command_pattern $param $(__get_site_realm)
+        SITE_REALM=$(__get_site_realm)
+        __replace_command_pattern $param $SITE_REALM
         ;;
 
       :env)
@@ -753,6 +764,8 @@ __save_credentials()
   echo "#!/bin/bash" > $cred_file
   echo "EMAIL_ADDRESS=$EMAIL_ADDRESS" >> $cred_file
   echo "PRIVATE_KEY=$PRIVATE_KEY" >> $cred_file
+  echo "SITE_REALM=$SITE_REALM" >> $cred_file
+  echo "realm $SITE_REALM" && exit
 }
 
 __print_command_confirmation()
@@ -1414,9 +1427,7 @@ __dump_database()
 
 __dump_restart_memcache()
 {
-  local os=$(__get_os)
-
-  if [ "$os" == "linux" ]; then
+  if [ "$OS" == "linux" ]; then
     __print_command_status "Restart memcached" $(sudo service memcached restart >/dev/null 2>&1)
   fi
 }
@@ -1677,7 +1688,7 @@ __command_logstream()
     which gem > /dev/null 2>&1
     if [ $? = 1 ]; then
       __print_error "You need Ruby gem on your machine."
-      [ "$(__get_os)" = "linux" ] && __print_info "Installing Ruby gems..." && sudo apt-get install rubygems
+      [ "$OS" = "linux" ] && __print_info "Installing Ruby gems..." && sudo apt-get install rubygems
       which gem > /dev/null 2>&1 && [ $? = 1 ] && __print_error "Failed to install Ruby gems. Please do that yourself and retry later" && exit 1
     fi
     which gem > /dev/null 2>&1 && [ $? = 0 ] && __print_info "Installing logstream..." && gem install logstream && [ $? = 1 ] && __print_error "Failed to install logstream. Please run: 'gem install logstream' yourself" && exit 1
