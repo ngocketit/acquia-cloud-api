@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.11
+VERSION=0.12
 REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
@@ -1383,7 +1383,7 @@ __dump_database()
 
   # Copy the database dump to local
   __print_info "Copy remote database dump to local"
-  scp $DUMP_SITE_NAME@$fqdn_server:/tmp/$db_file.gz /tmp/
+  scp $DUMP_SITE_NAME.$DUMP_ENVIRONMENT@$fqdn_server:/tmp/$db_file.gz /tmp/
 
   # Unzip the database dump file 
   cd /tmp; gunzip $db_file.gz >/dev/null 2>&1; DUMP_DB_UPDATE_RET=$?
@@ -1452,6 +1452,8 @@ __dump_post_database_dump()
   __print_command_status "Enable Stage File Proxy module" $(__dump_issue_local_drush_command "en stage_file_proxy -y")
 
   __print_command_status "Reset temporary file path" $(__dump_issue_local_drush_command "vset file_temporary_path /tmp -y")
+
+  __print_command_status "Reset private file path" $(__dump_issue_local_drush_command "vset file_private_path sites/default/private -y")
 
   # Remove FirePHPCore downloaded by devel module
   [ -d $DUMP_LOCAL_DOCROOT/FirePHPCore ] && rm -r $DUMP_LOCAL_DOCROOT/FirePHPCore
