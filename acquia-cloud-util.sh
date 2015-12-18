@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.12
+VERSION=0.13
 REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
@@ -1407,7 +1407,7 @@ __dump_database()
 
       __print_command_status "Remove temporary database dump files on local" $(rm -f /tmp/$db_file.gz; rm -f /tmp/$db_file)
 
-      __print_command_status "Remove temporary database dump files on server" $(ssh $DUMP_SITE_NAME@$fqdn_server "cd /tmp; rm -f $db_file.gz")
+      __print_command_status "Remove temporary database dump files on server" $(ssh $DUMP_SITE_NAME.$DUMP_ENVIRONMENT@$fqdn_server "cd /tmp; rm -f $db_file.gz")
 
       if [ $import_status -eq 0 ]; then
         __dump_post_database_dump
