@@ -4,7 +4,7 @@
 #               Acquia Cloud Utility	               	      #
 #               Author: phi.vanngoc@mirumagency.com           #
 ###############################################################
-VERSION=0.13
+VERSION=0.14
 REPOS_BASE_URL=https://raw.githubusercontent.com/ngocketit/acquia-cloud-api/master/
 REPOS_URL=$REPOS_BASE_URL/acquia-cloud-util.sh
 COMMANDS_REPOS_URL=$REPOS_BASE_URL/acquia-cloud-commands
@@ -1324,7 +1324,7 @@ __command_site_dump()
   # Get server name if it's not in the cache
   if [ -z "$DUMP_SERVER_NAME" ]; then
     local last_cmd_output=$(cat $COMMAND_RESULT_OUTPUT)
-    local servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"(staging|web|ded)-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
+    local servers=$(__beautify_json_output "$last_cmd_output" | grep -E "\"name\": \"(srv|staging|web|ded)-[0-9]+\"" | awk -F": " '{print $2}' | sed 's/[", ]//g' | tr "\\n" " ")
 
     [ -z "$servers" ] && __print_error "Can not get server list or there is no server. Abort!" && exit 1
 
